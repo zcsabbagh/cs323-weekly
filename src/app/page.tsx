@@ -11,12 +11,12 @@ export default function Home() {
   useEffect(() => {
     const t1 = setTimeout(() => {
       setShimmer(true);
-      const t2 = setTimeout(() => setShimmer(false), 2500);
+      const t2 = setTimeout(() => setShimmer(false), 8000);
 
       const interval = setInterval(() => {
         setShimmer(true);
-        setTimeout(() => setShimmer(false), 2500);
-      }, 5000);
+        setTimeout(() => setShimmer(false), 8000);
+      }, 12000);
 
       return () => {
         clearTimeout(t2);

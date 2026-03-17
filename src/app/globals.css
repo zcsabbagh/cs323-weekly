@@ -117,5 +117,5 @@
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: title-shimmer 1.8s cubic-bezier(0.25, 0.1, 0.25, 1);
+  animation: title-shimmer 8s cubic-bezier(0.25, 0.1, 0.25, 1);
 }
