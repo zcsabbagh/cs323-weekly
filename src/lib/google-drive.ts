@@ -4,7 +4,6 @@ import path from "path";
 const PARENT_FOLDER_ID = process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID!;
 
 function getAuth() {
-  // Support base64-encoded credentials (Railway/Vercel) or file path (local dev)
   const base64Creds = process.env.GOOGLE_CREDENTIALS_BASE64;
   if (base64Creds) {
     const credentials = JSON.parse(
@@ -26,7 +25,7 @@ function getAuth() {
   });
 }
 
-/** Create a subfolder inside the parent CS323 Recordings folder */
+/** Create a subfolder inside the Shared Drive */
 export async function createDriveFolder(name: string): Promise<string> {
   const auth = getAuth();
   const drive = google.drive({ version: "v3", auth });
@@ -37,6 +36,7 @@ export async function createDriveFolder(name: string): Promise<string> {
       mimeType: "application/vnd.google-apps.folder",
       parents: [PARENT_FOLDER_ID],
     },
+    supportsAllDrives: true,
     fields: "id",
   });
 
@@ -62,6 +62,7 @@ export async function uploadToDrive(opts: {
       mimeType: opts.mimeType,
       body: opts.body,
     },
+    supportsAllDrives: true,
     fields: "id, webViewLink",
   });
 
