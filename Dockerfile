@@ -20,11 +20,12 @@ ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+COPY start.sh ./start.sh
+RUN chmod +x start.sh
 
 EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 ENV DATA_DIR=/app/data
 
-# Run as root so we can write to the mounted volume
-CMD ["node", "server.js"]
+CMD ["./start.sh"]
