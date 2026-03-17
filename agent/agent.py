@@ -10,6 +10,9 @@ from livekit.plugins import anthropic, elevenlabs, silero, tavus
 
 logger = logging.getLogger("cs323-agent")
 logger.setLevel(logging.INFO)
+_fh = logging.FileHandler("/tmp/cs323-agent-debug.log")
+_fh.setLevel(logging.INFO)
+logger.addHandler(_fh)
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env.local"))
 
@@ -146,16 +149,23 @@ async def interview_agent(ctx: agents.JobContext):
     # Start recording the room to GCS
     if GCS_BUCKET:
         try:
-            cred_path = os.getenv(
-                "GOOGLE_APPLICATION_CREDENTIALS",
-                os.path.join(os.path.dirname(__file__), "..", "google-credentials.json"),
-            )
+            # Load GCS credentials: prefer env var (for LiveKit Cloud), fallback to file
             gcp_creds = ""
-            try:
-                with open(cred_path) as f:
-                    gcp_creds = f.read()
-            except FileNotFoundError:
-                logger.info(f"GCP credentials not found at {cred_path}")
+            base64_creds = os.getenv("GOOGLE_CREDENTIALS_BASE64", "")
+            if base64_creds:
+                import base64 as _b64
+                gcp_creds = _b64.b64decode(base64_creds).decode("utf-8")
+                logger.info("Loaded GCP credentials from GOOGLE_CREDENTIALS_BASE64 env var")
+            else:
+                cred_path = os.path.abspath(
+                    os.path.join(os.path.dirname(__file__), "..", "google-credentials.json")
+                )
+                try:
+                    with open(cred_path) as f:
+                        gcp_creds = f.read()
+                    logger.info(f"Loaded GCP credentials from {cred_path}")
+                except FileNotFoundError:
+                    logger.info(f"GCP credentials not found at {cred_path}")
 
             from livekit.protocol.egress import (
                 RoomCompositeEgressRequest,
