@@ -37,6 +37,7 @@ export default function TeacherPage() {
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState("");
   const [questions, setQuestions] = useState("");
+  const [additionalContext, setAdditionalContext] = useState("");
   const [fileList, setFileList] = useState<File[]>([]);
   const [interviewEnabled, setInterviewEnabled] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -108,23 +109,32 @@ export default function TeacherPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!title || !fileList.length) return;
+    if (!title || (!fileList.length && !additionalContext.trim())) return;
 
     setLoading(true);
 
     // Upload each PDF individually (parallel) — Railway handles all sizes
-    const summaries = await Promise.all(
-      fileList.map(async (f) => {
-        const fd = new FormData();
-        fd.append("file", f);
-        const res = await fetch("/api/upload", { method: "POST", body: fd });
-        if (!res.ok) throw new Error(`Failed to process ${f.name}`);
-        const data = await res.json();
-        return data.summary as string;
-      })
-    );
+    const parts: string[] = [];
 
-    const context = summaries.join("\n\n---\n\n");
+    if (fileList.length > 0) {
+      const summaries = await Promise.all(
+        fileList.map(async (f) => {
+          const fd = new FormData();
+          fd.append("file", f);
+          const res = await fetch("/api/upload", { method: "POST", body: fd });
+          if (!res.ok) throw new Error(`Failed to process ${f.name}`);
+          const data = await res.json();
+          return data.summary as string;
+        })
+      );
+      parts.push(...summaries);
+    }
+
+    if (additionalContext.trim()) {
+      parts.push(`## Additional Context\n\n${additionalContext.trim()}`);
+    }
+
+    const context = parts.join("\n\n---\n\n");
 
     // Create assignment with pre-processed context
     const res = await fetch("/api/assignments", {
@@ -141,6 +151,7 @@ export default function TeacherPage() {
       setCreatedLink(link);
       setTitle("");
       setQuestions("");
+      setAdditionalContext("");
       setFileList([]);
       if (fileInputRef.current) fileInputRef.current.value = "";
       confetti();
@@ -156,9 +167,17 @@ export default function TeacherPage() {
     e.stopPropagation();
     if (!confirm("Delete this assignment?")) return;
 
-    const res = await fetch(`/api/assignments/${assignmentId}`, {
+    // Try proxy first, fall back to direct Railway call
+    let res = await fetch(`/api/assignments/${assignmentId}`, {
       method: "DELETE",
     });
+    if (!res.ok) {
+      // Vercel proxy may not forward DELETE — call Railway directly
+      res = await fetch(
+        `https://cs323-weekly-production.up.railway.app/api/assignments/${assignmentId}`,
+        { method: "DELETE" }
+      );
+    }
     if (res.ok) {
       setAssignments((prev) => prev.filter((a) => a.id !== assignmentId));
     }
@@ -455,7 +474,7 @@ export default function TeacherPage() {
 
               {/* File upload zone */}
               <div className="space-y-2">
-                <Label className="text-sm">Reading PDFs</Label>
+                <Label className="text-sm">Reading PDFs (optional)</Label>
                 <div
                   onClick={() => fileInputRef.current?.click()}
                   onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
@@ -516,6 +535,21 @@ export default function TeacherPage() {
                 )}
               </div>
 
+              {/* Additional text context */}
+              <div className="space-y-2">
+                <Label htmlFor="context" className="text-sm">
+                  Additional Context (optional)
+                </Label>
+                <Textarea
+                  id="context"
+                  value={additionalContext}
+                  onChange={(e) => setAdditionalContext(e.target.value)}
+                  placeholder="Paste article text, lecture notes, or any other reading material..."
+                  rows={4}
+                  className="text-base"
+                />
+              </div>
+
               {/* Interview toggle */}
               <div className="flex items-center justify-between py-2">
                 <div>
@@ -545,7 +579,7 @@ export default function TeacherPage() {
               </div>
               <Button
                 type="submit"
-                disabled={loading || !title || !fileList.length}
+                disabled={loading || !title || (!fileList.length && !additionalContext.trim())}
                 className="w-full h-12 text-base"
               >
                 {loading ? "Publishing..." : "Publish"}
