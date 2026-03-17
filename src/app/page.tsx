@@ -11,12 +11,12 @@ export default function Home() {
   useEffect(() => {
     const t1 = setTimeout(() => {
       setShimmer(true);
-      const t2 = setTimeout(() => setShimmer(false), 8000);
+      const t2 = setTimeout(() => setShimmer(false), 40000);
 
       const interval = setInterval(() => {
         setShimmer(true);
-        setTimeout(() => setShimmer(false), 8000);
-      }, 12000);
+        setTimeout(() => setShimmer(false), 40000);
+      }, 50000);
 
       return () => {
         clearTimeout(t2);
@@ -48,14 +48,14 @@ export default function Home() {
         </div>
 
         <div className="absolute bottom-10 left-10 md:bottom-14 md:left-14">
-          <h1
-            className={`font-display text-7xl md:text-9xl font-normal tracking-tight leading-none ${
-              shimmer ? "title-shimmer" : "text-white/90"
-            }`}
-          >
+          <h1 className="font-display text-7xl md:text-9xl font-normal tracking-tight leading-none text-white/90">
             CS 323
           </h1>
-          <p className="font-display italic text-5xl md:text-7xl text-white/75 mt-2 tracking-tight">
+          <p
+            className={`font-display italic text-5xl md:text-7xl mt-2 tracking-tight ${
+              shimmer ? "title-shimmer" : "text-white/75"
+            }`}
+          >
             The AI Awakening
           </p>
         </div>
