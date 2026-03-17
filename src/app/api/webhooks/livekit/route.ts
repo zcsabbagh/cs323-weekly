@@ -52,16 +52,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // Get file results
-    const fileResults = egressInfo.fileResults || [];
-    if (fileResults.length === 0) {
-      console.log("No file results in egress_ended event");
+    // Get file info — room composite uses egressInfo.file (EncodedFileInfo),
+    // track composites use egressInfo.fileResults. Check both.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ei = egressInfo as any;
+    const gcsFilename: string =
+      ei.file?.filename || (ei.fileResults?.[0]?.filename) || "";
+    const roomName: string = ei.roomName || egressInfo.roomName || "";
+
+    if (!gcsFilename) {
+      console.log("No file in egress_ended event, skipping");
       return NextResponse.json({ ok: true });
     }
-
-    const fileResult = fileResults[0];
-    const gcsFilename = fileResult.filename || "";
-    const roomName = egressInfo.roomName || "";
 
     console.log(
       `Egress ended: room=${roomName}, file=${gcsFilename}`
