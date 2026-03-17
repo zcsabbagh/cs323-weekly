@@ -40,7 +40,7 @@ export default function TeacherPage() {
   const [questions, setQuestions] = useState("");
   const [additionalContext, setAdditionalContext] = useState("");
   const [uploadedFiles, setUploadedFiles] = useState<
-    { name: string; size: number; status: "uploading" | "done" | "error"; summary: string }[]
+    { name: string; size: number; status: "uploading" | "done" | "error"; text: string }[]
   >([]);
   const [interviewEnabled, setInterviewEnabled] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -117,7 +117,7 @@ export default function TeacherPage() {
       name: f.name,
       size: f.size,
       status: "uploading" as const,
-      summary: "",
+      text: "",
     }));
     setUploadedFiles((prev) => [...prev, ...placeholders]);
 
@@ -132,7 +132,7 @@ export default function TeacherPage() {
           const data = await res.json();
           setUploadedFiles((prev) =>
             prev.map((item, j) =>
-              j === startIdx + i ? { ...item, status: "done", summary: data.summary } : item
+              j === startIdx + i ? { ...item, status: "done", text: data.text } : item
             )
           );
         } catch {
@@ -148,12 +148,12 @@ export default function TeacherPage() {
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    const doneSummaries = uploadedFiles.filter((f) => f.status === "done").map((f) => f.summary);
-    if (!title || (!doneSummaries.length && !additionalContext.trim())) return;
+    const doneTexts = uploadedFiles.filter((f) => f.status === "done");
+    if (!title || (!doneTexts.length && !additionalContext.trim())) return;
 
     setLoading(true);
 
-    const parts: string[] = [...doneSummaries];
+    const parts: string[] = doneTexts.map((f) => `--- ${f.name} ---\n${f.text}`);
 
     if (additionalContext.trim()) {
       parts.push(`## Additional Context\n\n${additionalContext.trim()}`);
