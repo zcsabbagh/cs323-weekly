@@ -1,5 +1,6 @@
 "use client";
 
+import { copyToClipboard } from "@/lib/copy";
 import { api } from "@/lib/api";
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
@@ -65,7 +66,7 @@ export default function AssignmentDetailPage({
       : "";
 
   function copyLink() {
-    navigator.clipboard.writeText(studentUrl);
+    copyToClipboard(studentUrl);
     setLinkCopied(true);
     setTimeout(() => setLinkCopied(false), 2000);
   }

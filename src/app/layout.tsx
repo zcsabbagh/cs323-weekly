@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Source_Sans_3, Instrument_Serif, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { Toaster } from "@/components/ui/sonner";
 
 const sourceSans = Source_Sans_3({
   variable: "--font-sans",
@@ -51,6 +52,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${sourceSans.variable} ${instrumentSerif.variable} ${geistMono.variable} antialiased`}>
         {children}
+        <Toaster theme="dark" position="bottom-center" />
       </body>
     </html>
   );

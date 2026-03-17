@@ -1,5 +1,6 @@
 "use client";
 
+import { copyToClipboard } from "@/lib/copy";
 import { api } from "@/lib/api";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
@@ -232,7 +233,7 @@ export default function TeacherPage() {
   }
 
   function copyLink(link: string) {
-    navigator.clipboard.writeText(link);
+    copyToClipboard(link);
     setLinkCopied(true);
     setTimeout(() => setLinkCopied(false), 2000);
   }
@@ -342,7 +343,7 @@ export default function TeacherPage() {
                             title="Copy student link"
                             onClick={(e) => {
                               e.stopPropagation();
-                              navigator.clipboard.writeText(`${window.location.origin}/student/${a.id}`);
+                              copyToClipboard(`${window.location.origin}/student/${a.id}`);
                             }}
                           >
                             <svg className="h-3.5 w-3.5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>

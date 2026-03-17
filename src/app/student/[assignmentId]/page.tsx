@@ -1,5 +1,6 @@
 "use client";
 
+import { copyToClipboard } from "@/lib/copy";
 import { api } from "@/lib/api";
 import { useState, useCallback, useEffect, use } from "react";
 import { Button } from "@/components/ui/button";
@@ -285,7 +286,7 @@ export default function StudentPage({
                   <div className="inline-flex items-center gap-2 bg-muted/50 rounded-lg px-3 py-2">
                     <p className="text-sm font-mono text-foreground select-all">{submissionId}</p>
                     <button
-                      onClick={() => navigator.clipboard.writeText(submissionId)}
+                      onClick={() => copyToClipboard(submissionId)}
                       className="h-6 w-6 flex items-center justify-center rounded hover:bg-muted transition-colors shrink-0"
                       title="Copy"
                     >
