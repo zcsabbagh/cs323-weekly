@@ -99,13 +99,18 @@ async def interview_agent(ctx: agents.JobContext):
         vad=silero.VAD.load(),
     )
 
-    # Start Tavus avatar if configured
+    # Start Tavus avatar if configured (with timeout to avoid blocking)
     if TAVUS_REPLICA_ID and TAVUS_PERSONA_ID:
-        avatar = tavus.AvatarSession(
-            replica_id=TAVUS_REPLICA_ID,
-            persona_id=TAVUS_PERSONA_ID,
-        )
-        await avatar.start(session, room=ctx.room)
+        try:
+            import asyncio as _asyncio
+            avatar = tavus.AvatarSession(
+                replica_id=TAVUS_REPLICA_ID,
+                persona_id=TAVUS_PERSONA_ID,
+            )
+            await _asyncio.wait_for(avatar.start(session, room=ctx.room), timeout=15)
+            logger.info("Tavus avatar started")
+        except Exception as e:
+            logger.info(f"Tavus avatar failed (continuing without): {e}")
 
     agent = InterviewAgent(
         system_prompt=system_prompt,
