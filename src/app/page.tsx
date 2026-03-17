@@ -55,7 +55,7 @@ export default function Home() {
           >
             CS 323
           </h1>
-          <p className="font-display italic text-2xl md:text-3xl text-white/35 mt-2 tracking-tight">
+          <p className="font-display italic text-5xl md:text-7xl text-white/75 mt-2 tracking-tight">
             The AI Awakening
           </p>
         </div>
