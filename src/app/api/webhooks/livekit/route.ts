@@ -29,7 +29,14 @@ function getStorage() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.text();
-    const authHeader = req.headers.get("authorization") || "";
+    // LiveKit sends auth as "Authorization" header; log all headers for debugging
+    const headerKeys = Array.from(req.headers.keys());
+    console.log("Webhook headers:", headerKeys.join(", "));
+    const authHeader =
+      req.headers.get("authorization") ||
+      req.headers.get("Authorization") ||
+      "";
+    console.log("Auth header present:", !!authHeader, "length:", authHeader.length);
 
     // Validate webhook signature
     const event = await receiver.receive(body, authHeader);
