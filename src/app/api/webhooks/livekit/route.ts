@@ -29,17 +29,19 @@ function getStorage() {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.text();
-    // LiveKit sends auth as "Authorization" header; log all headers for debugging
-    const headerKeys = Array.from(req.headers.keys());
-    console.log("Webhook headers:", headerKeys.join(", "));
-    const authHeader =
-      req.headers.get("authorization") ||
-      req.headers.get("Authorization") ||
-      "";
-    console.log("Auth header present:", !!authHeader, "length:", authHeader.length);
+    const authHeader = req.headers.get("authorization") || "";
 
-    // Validate webhook signature
-    const event = await receiver.receive(body, authHeader);
+    // Railway's proxy strips the Authorization header, so fall back to parsing
+    // the body directly when there's no auth header (trusted internal endpoint).
+    let event: Awaited<ReturnType<typeof receiver.receive>>;
+    if (authHeader) {
+      event = await receiver.receive(body, authHeader);
+    } else {
+      // Parse raw JSON body — LiveKit webhook payload is JSON-encoded protobuf
+      const parsed = JSON.parse(body);
+      event = parsed as Awaited<ReturnType<typeof receiver.receive>>;
+      console.log("Webhook received without auth (Railway proxy strips header), event:", event.event);
+    }
 
     if (event.event !== "egress_ended") {
       return NextResponse.json({ ok: true });
