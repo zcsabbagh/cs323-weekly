@@ -13,6 +13,13 @@ const receiver = new WebhookReceiver(
 const GCS_BUCKET = process.env.GCS_BUCKET || "cs323-recordings";
 
 function getStorage() {
+  const base64Creds = process.env.GOOGLE_CREDENTIALS_BASE64;
+  if (base64Creds) {
+    const credentials = JSON.parse(
+      Buffer.from(base64Creds, "base64").toString("utf-8")
+    );
+    return new Storage({ credentials });
+  }
   const credPath =
     process.env.GOOGLE_APPLICATION_CREDENTIALS ||
     path.join(process.cwd(), "google-credentials.json");

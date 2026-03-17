@@ -4,6 +4,18 @@ import path from "path";
 const PARENT_FOLDER_ID = process.env.GOOGLE_DRIVE_PARENT_FOLDER_ID!;
 
 function getAuth() {
+  // Support base64-encoded credentials (Railway/Vercel) or file path (local dev)
+  const base64Creds = process.env.GOOGLE_CREDENTIALS_BASE64;
+  if (base64Creds) {
+    const credentials = JSON.parse(
+      Buffer.from(base64Creds, "base64").toString("utf-8")
+    );
+    return new google.auth.GoogleAuth({
+      credentials,
+      scopes: ["https://www.googleapis.com/auth/drive"],
+    });
+  }
+
   const credPath =
     process.env.GOOGLE_APPLICATION_CREDENTIALS ||
     path.join(process.cwd(), "google-credentials.json");
