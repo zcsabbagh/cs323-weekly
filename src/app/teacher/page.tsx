@@ -81,7 +81,7 @@ export default function TeacherPage() {
       <div className="min-h-screen flex items-center justify-center px-8">
         <GridBackground />
         <form onSubmit={handleLogin} className="w-full max-w-xs space-y-4 relative z-10">
-          <h1 className="text-xl font-light text-center">
+          <h1 className="font-display text-xl text-center">
             Teacher Access
           </h1>
           <div className="space-y-2">
@@ -114,7 +114,7 @@ export default function TeacherPage() {
 
       <header className="border-b border-border px-8 py-5 relative z-10">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <Link href="/" className="text-lg font-light text-foreground">
+          <Link href="/" className="font-display text-lg text-foreground">
             CS 323
           </Link>
         </div>
