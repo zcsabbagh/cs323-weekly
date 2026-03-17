@@ -168,6 +168,7 @@ async def interview_agent(ctx: agents.JobContext):
             await lk.egress.start_room_composite_egress(
                 RoomCompositeEgressRequest(
                     room_name=ctx.room.name,
+                    layout="grid-dark",
                     file_outputs=[
                         EncodedFileOutput(
                             file_type=EncodedFileType.MP4,
