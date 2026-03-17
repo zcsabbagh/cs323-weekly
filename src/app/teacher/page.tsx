@@ -134,7 +134,8 @@ export default function TeacherPage() {
           for (let i = 1; i <= pdf.numPages; i++) {
             const page = await pdf.getPage(i);
             const content = await page.getTextContent();
-            text += content.items.map((item: { str?: string }) => item.str || "").join(" ") + "\n";
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            text += content.items.map((item: any) => item.str || "").join(" ") + "\n";
           }
           res = await fetch("/api/upload", {
             method: "POST",
