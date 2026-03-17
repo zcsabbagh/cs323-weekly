@@ -102,12 +102,13 @@ export function AsciiArt({ imageSrc, className }: Props) {
     dragging.current = false;
   }, []);
 
-  const handleWheel = useCallback(
-    (e: React.WheelEvent<HTMLDivElement>) => {
+  // Attach wheel with passive:false so we can preventDefault
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    function onWheel(e: WheelEvent) {
       e.preventDefault();
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-
+      const rect = el!.getBoundingClientRect();
       const dpr = window.devicePixelRatio || 1;
       const mx = (e.clientX - rect.left) * dpr;
       const my = (e.clientY - rect.top) * dpr;
@@ -116,14 +117,14 @@ export function AsciiArt({ imageSrc, className }: Props) {
       const delta = e.deltaY > 0 ? 0.9 : 1.1;
       const newZoom = Math.max(0.5, Math.min(12, oldZoom * delta));
 
-      // Zoom toward cursor
       pan.current.x = mx - (mx - pan.current.x) * (newZoom / oldZoom);
       pan.current.y = my - (my - pan.current.y) * (newZoom / oldZoom);
       zoom.current = newZoom;
       needsStaticRedraw.current = true;
-    },
-    []
-  );
+    }
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -361,8 +362,7 @@ export function AsciiArt({ imageSrc, className }: Props) {
       onMouseDown={handleMouseDown}
       onMouseUp={handleMouseUp}
       onMouseLeave={handleMouseLeave}
-      onWheel={handleWheel}
-      style={{ cursor: dragging.current ? "grabbing" : "grab", overflow: "hidden" }}
+      style={{ cursor: "grab", overflow: "hidden" }}
     >
       <canvas ref={canvasRef} />
     </div>

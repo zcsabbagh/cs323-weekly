@@ -93,3 +93,24 @@
     @apply font-sans;
   }
 }
+
+@keyframes title-shimmer {
+  0% { background-position: 200% center; }
+  100% { background-position: -200% center; }
+}
+
+.title-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.9) 0%,
+    rgba(255,255,255,0.9) 35%,
+    rgba(180,200,255,1) 50%,
+    rgba(255,255,255,0.9) 65%,
+    rgba(255,255,255,0.9) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: title-shimmer 1s ease-in-out;
+}

@@ -3,11 +3,11 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { GridBackground } from "@/components/grid-bg";
 import type { Assignment } from "@/lib/db";
 
 const TEACHER_PASSWORD = "ebsy";
@@ -79,8 +79,9 @@ export default function TeacherPage() {
   if (!authenticated) {
     return (
       <div className="min-h-screen flex items-center justify-center px-8">
-        <form onSubmit={handleLogin} className="w-full max-w-xs space-y-4">
-          <h1 className="text-2xl font-light text-center">
+        <GridBackground />
+        <form onSubmit={handleLogin} className="w-full max-w-xs space-y-4 relative z-10">
+          <h1 className="text-xl font-light text-center">
             Teacher Access
           </h1>
           <div className="space-y-2">
@@ -93,6 +94,7 @@ export default function TeacherPage() {
               }}
               placeholder="Password"
               autoFocus
+              className="bg-card/80 backdrop-blur-sm"
             />
             {passwordError && (
               <p className="text-xs text-destructive">Incorrect password</p>
@@ -107,66 +109,19 @@ export default function TeacherPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b border-border px-8 py-5">
+    <div className="min-h-screen bg-background relative">
+      <GridBackground />
+
+      <header className="border-b border-border px-8 py-5 relative z-10">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <Link href="/" className="text-xl font-light text-foreground">
+          <Link href="/" className="text-lg font-light text-foreground">
             CS 323
           </Link>
-          <Button
-            onClick={() => setCreating(!creating)}
-            variant={creating ? "secondary" : "default"}
-            size="sm"
-          >
-            {creating ? "Cancel" : "New Assignment"}
-          </Button>
         </div>
       </header>
 
-      <main className="max-w-5xl mx-auto px-8 py-8 space-y-6">
-        {creating && (
-          <Card className="p-6">
-            <h2 className="text-lg font-light mb-4">
-              Create Assignment
-            </h2>
-            <form onSubmit={handleCreate} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="title">Title</Label>
-                <Input
-                  id="title"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Week 3: Attention Is All You Need"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="description">Description (optional)</Label>
-                <Textarea
-                  id="description"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Brief description of the readings..."
-                  rows={2}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="files">Reading PDFs</Label>
-                <Input
-                  id="files"
-                  type="file"
-                  accept=".pdf"
-                  multiple
-                  onChange={(e) => setFiles(e.target.files)}
-                />
-              </div>
-              <Button type="submit" disabled={loading || !title || !files?.length}>
-                {loading ? "Creating..." : "Create & Publish"}
-              </Button>
-            </form>
-          </Card>
-        )}
-
-        {assignments.length === 0 && !creating ? (
+      <main className="max-w-5xl mx-auto px-8 py-8 relative z-10">
+        {assignments.length === 0 ? (
           <div className="text-center py-20">
             <p className="text-muted-foreground text-sm">
               No assignments yet.
@@ -176,7 +131,7 @@ export default function TeacherPage() {
           <div className="space-y-2">
             {assignments.map((a) => (
               <Link key={a.id} href={`/teacher/${a.id}`}>
-                <div className="flex items-center justify-between py-4 px-1 border-b border-border hover:bg-muted/50 transition-colors cursor-pointer">
+                <div className="flex items-center justify-between py-4 px-4 border border-border/50 rounded-lg bg-card/60 backdrop-blur-sm hover:bg-card/80 transition-colors cursor-pointer mb-2">
                   <div>
                     <h3 className="text-sm font-medium">{a.title}</h3>
                     {a.description && (
@@ -194,6 +149,58 @@ export default function TeacherPage() {
           </div>
         )}
       </main>
+
+      {/* Circular plus button — fixed bottom right */}
+      <button
+        onClick={() => setCreating(true)}
+        className="fixed bottom-8 right-8 z-20 w-14 h-14 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-2xl font-light hover:scale-105 active:scale-95 transition-transform shadow-lg shadow-primary/20"
+        title="New Assignment"
+      >
+        +
+      </button>
+
+      {/* Create assignment dialog */}
+      <Dialog open={creating} onOpenChange={setCreating}>
+        <DialogContent className="bg-card/95 backdrop-blur-md border-border/50">
+          <DialogHeader>
+            <DialogTitle className="font-light text-lg">New Assignment</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleCreate} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="title" className="text-xs">Title</Label>
+              <Input
+                id="title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Week 3: Attention Is All You Need"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="description" className="text-xs">Description (optional)</Label>
+              <Textarea
+                id="description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Brief description of the readings..."
+                rows={2}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="files" className="text-xs">Reading PDFs</Label>
+              <Input
+                id="files"
+                type="file"
+                accept=".pdf"
+                multiple
+                onChange={(e) => setFiles(e.target.files)}
+              />
+            </div>
+            <Button type="submit" disabled={loading || !title || !files?.length} className="w-full">
+              {loading ? "Creating..." : "Create & Publish"}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
