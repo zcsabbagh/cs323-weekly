@@ -26,35 +26,42 @@ server = AgentServer()
 
 async def on_session_end(ctx: agents.JobContext) -> None:
     """Save the transcript to our Next.js API when the session ends."""
-    report = ctx.make_session_report()
-    report_dict = report.to_dict()
-
-    # Extract transcript from conversation history
-    transcript_lines = []
-    history = report_dict.get("conversation", [])
-    for item in history:
-        role = item.get("role", "")
-        content = item.get("content", "")
-        if not content:
-            continue
-        if role == "assistant":
-            transcript_lines.append(f"Interviewer: {content}")
-        elif role == "user":
-            transcript_lines.append(f"Student: {content}")
-
-    transcript = "\n\n".join(transcript_lines)
     room_name = ctx.room.name
+    transcript_lines = []
+
+    try:
+        report = ctx.make_session_report()
+        report_dict = report.to_dict()
+        history = report_dict.get("conversation", [])
+        for item in history:
+            role = item.get("role", "")
+            content = item.get("content", "")
+            if not content:
+                continue
+            if role == "assistant":
+                transcript_lines.append(f"Interviewer: {content}")
+            elif role == "user":
+                transcript_lines.append(f"Student: {content}")
+    except Exception as e:
+        print(f"Failed to build session report for {room_name}: {e}")
+
+    # If we got no transcript from the report, try the stored one
+    if not transcript_lines and hasattr(ctx, "_transcript_lines"):
+        transcript_lines = ctx._transcript_lines  # type: ignore
+
+    transcript = "\n\n".join(transcript_lines) if transcript_lines else "Transcript unavailable"
 
     # POST transcript to our API
     try:
         async with httpx.AsyncClient() as client:
-            await client.post(
+            resp = await client.post(
                 f"{API_URL}/api/transcripts",
                 json={"roomName": room_name, "transcript": transcript},
                 timeout=10,
             )
+            print(f"Saved transcript for {room_name}: status={resp.status_code}")
     except Exception as e:
-        print(f"Failed to save transcript for room {room_name}: {e}")
+        print(f"Failed to save transcript for {room_name}: {e}")
 
 
 @server.rtc_session(agent_name="cs323-interviewer", on_session_end=on_session_end)
@@ -112,6 +119,27 @@ async def interview_agent(ctx: agents.JobContext):
         system_prompt=system_prompt,
         first_message=first_message,
     )
+
+    # Collect transcript in real-time as a backup
+    transcript_lines: list[str] = []
+
+    @session.on("conversation_item_added")
+    def on_item(item):
+        try:
+            role = getattr(item, "role", "")
+            content = ""
+            if hasattr(item, "text_content"):
+                content = item.text_content or ""
+            elif hasattr(item, "content"):
+                content = str(item.content) if item.content else ""
+            if content:
+                label = "Interviewer" if role == "assistant" else "Student"
+                transcript_lines.append(f"{label}: {content}")
+        except Exception:
+            pass
+
+    # Store on ctx so on_session_end can access it
+    ctx._transcript_lines = transcript_lines  # type: ignore
 
     await session.start(
         room=ctx.room,
