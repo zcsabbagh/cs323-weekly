@@ -1,7 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSubmission, saveSubmission, getAssignment } from "@/lib/db";
-import { getConversation } from "@/lib/elevenlabs";
 import { summarizeTranscript } from "@/lib/anthropic";
+import fs from "fs/promises";
+import path from "path";
+
+const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
+
+async function getTranscriptFromStorage(roomName: string): Promise<string | null> {
+  try {
+    return await fs.readFile(
+      path.join(DATA_DIR, "transcripts", `${roomName}.txt`),
+      "utf-8"
+    );
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(
   _req: NextRequest,
@@ -25,29 +39,20 @@ export async function POST(
   await saveSubmission(submission);
 
   try {
-    // Retry fetching conversation until it's done (max 30 attempts, 2s apart)
-    let convo = null;
+    // Try to get transcript from file storage (LiveKit agent saves it there)
+    let transcript: string | null = null;
     for (let i = 0; i < 30; i++) {
-      convo = await getConversation(submission.conversationId);
-      if (convo.status === "done") break;
+      transcript = await getTranscriptFromStorage(submission.conversationId);
+      if (transcript) break;
       await new Promise((r) => setTimeout(r, 2000));
     }
 
-    if (!convo || convo.status !== "done") {
-      throw new Error("Conversation not ready after 60s");
+    if (!transcript) {
+      throw new Error("Transcript not available after 60s");
     }
-
-    // Build transcript string
-    const transcript = convo.transcript
-      .map(
-        (t: { role: string; message: string }) =>
-          `${t.role === "agent" ? "Interviewer" : "Student"}: ${t.message}`
-      )
-      .join("\n\n");
 
     submission.transcript = transcript;
 
-    // Summarize with Anthropic
     const { summary, score } = await summarizeTranscript(transcript, assignment.context);
     submission.summary = summary;
     submission.score = score;

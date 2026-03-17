@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSubmissions, saveSubmission, getAssignment } from "@/lib/db";
-import { getConversation } from "@/lib/elevenlabs";
 import { summarizeTranscript } from "@/lib/anthropic";
 import { v4 as uuid } from "uuid";
+import fs from "fs/promises";
+import path from "path";
+
+const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
 
 export async function GET(
   _req: NextRequest,
@@ -11,6 +14,18 @@ export async function GET(
   const { id } = await params;
   const submissions = await getSubmissions(id);
   return NextResponse.json(submissions);
+}
+
+async function getTranscriptFromStorage(roomName: string): Promise<string | null> {
+  try {
+    const transcript = await fs.readFile(
+      path.join(DATA_DIR, "transcripts", `${roomName}.txt`),
+      "utf-8"
+    );
+    return transcript;
+  } catch {
+    return null;
+  }
 }
 
 async function processSubmission(assignmentId: string, submissionId: string) {
@@ -27,24 +42,17 @@ async function processSubmission(assignmentId: string, submissionId: string) {
   await save(submission);
 
   try {
-    // Wait for ElevenLabs to finish processing the conversation
-    let convo = null;
+    // Wait for the agent to save the transcript (poll for up to 60s)
+    let transcript: string | null = null;
     for (let i = 0; i < 30; i++) {
-      convo = await getConversation(submission.conversationId);
-      if (convo.status === "done") break;
+      transcript = await getTranscriptFromStorage(submission.conversationId);
+      if (transcript) break;
       await new Promise((r) => setTimeout(r, 2000));
     }
 
-    if (!convo || convo.status !== "done") {
-      throw new Error("Conversation not ready after 60s");
+    if (!transcript) {
+      throw new Error("Transcript not available after 60s");
     }
-
-    const transcript = convo.transcript
-      .map(
-        (t: { role: string; message: string }) =>
-          `${t.role === "agent" ? "Interviewer" : "Student"}: ${t.message}`
-      )
-      .join("\n\n");
 
     submission.transcript = transcript;
 
@@ -78,11 +86,14 @@ export async function POST(
   }
 
   const body = await req.json();
-  const { sunnetId, conversationId, duration } = body;
+  const { sunnetId, roomName, conversationId, duration } = body;
 
-  if (!sunnetId || !conversationId) {
+  // Support both roomName (LiveKit) and conversationId (legacy ElevenLabs)
+  const interviewId = roomName || conversationId;
+
+  if (!sunnetId || !interviewId) {
     return NextResponse.json(
-      { error: "sunnetId and conversationId required" },
+      { error: "sunnetId and roomName (or conversationId) required" },
       { status: 400 }
     );
   }
@@ -91,7 +102,7 @@ export async function POST(
     id: uuid(),
     assignmentId: id,
     sunnetId,
-    conversationId,
+    conversationId: interviewId, // reuse field for roomName
     transcript: "",
     summary: "",
     score: "pending" as const,
@@ -102,10 +113,6 @@ export async function POST(
 
   await saveSubmission(submission);
 
-  // Process inline — waitUntil not available in all runtimes,
-  // so we process directly and return after.
-  // The student already sees "Submitted" immediately from the client.
-  // This runs server-side regardless of client connection.
   processSubmission(id, submission.id).catch(console.error);
 
   return NextResponse.json(submission);
