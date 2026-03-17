@@ -127,7 +127,9 @@ export default function TeacherPage() {
         } else {
           // Large file — extract text client-side with pdfjs, send as JSON
           const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
-          pdfjsLib.GlobalWorkerOptions.workerSrc = "";
+          if (typeof window !== "undefined" && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+          }
           const arrayBuf = await f.arrayBuffer();
           const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuf) }).promise;
           let text = "";
