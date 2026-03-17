@@ -5,17 +5,16 @@ const RAILWAY_URL = process.env.RAILWAY_URL || "https://cs323-weekly-production.
 const nextConfig: NextConfig = {
   output: "standalone",
   serverExternalPackages: ["pdf-parse"],
-  experimental: {
-    serverActions: {
-      bodySizeLimit: "100mb",
-    },
-  },
-  rewrites: async () => [
-    {
-      source: "/api/:path*",
-      destination: `${RAILWAY_URL}/api/:path*`,
-    },
-  ],
+  rewrites: async () => ({
+    beforeFiles: [
+      {
+        source: "/api/:path*",
+        destination: `${RAILWAY_URL}/api/:path*`,
+      },
+    ],
+    afterFiles: [],
+    fallback: [],
+  }),
 };
 
 export default nextConfig;
