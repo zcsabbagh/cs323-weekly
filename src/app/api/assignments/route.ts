@@ -2,11 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAssignments, saveAssignment } from "@/lib/db";
 import { createAgent } from "@/lib/elevenlabs";
 import { v4 as uuid } from "uuid";
-import Anthropic from "@anthropic-ai/sdk";
 
-const anthropic = new Anthropic();
-
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 export async function GET() {
   const assignments = await getAssignments();
@@ -15,41 +12,14 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { title, description, context: rawContext } = body;
+  const { title, description, context } = body;
 
-  if (!title || !rawContext) {
+  if (!title || !context) {
     return NextResponse.json(
       { error: "Title and context required" },
       { status: 400 }
     );
   }
-
-  // Single Claude call to summarize all readings into interview context
-  const summaryRes = await anthropic.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 4096,
-    messages: [
-      {
-        role: "user",
-        content: `You are preparing context for a university course interview (CS 323: The AI Awakening).
-
-Below are the extracted texts from assigned readings. Summarize ALL of them into a detailed briefing that an AI interviewer can use. For each reading, include:
-1. Main thesis and key arguments
-2. Important data points, statistics, or examples
-3. Conclusions and recommendations
-4. Controversial or debate-worthy claims
-
-Be thorough — include specific details only someone who read the material would know.
-
-${rawContext}`,
-      },
-    ],
-  });
-
-  const context =
-    summaryRes.content[0].type === "text"
-      ? summaryRes.content[0].text
-      : rawContext;
 
   const systemPrompt = `You interview students about assigned readings for CS 323. This is a 5-minute interview.
 
