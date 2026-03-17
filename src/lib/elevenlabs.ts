@@ -21,13 +21,13 @@ export async function createAgent(opts: {
       conversation_config: {
         agent: {
           first_message:
-            "Hi there! I'm ready to discuss this week's readings with you. Let's start — what stood out to you most from the readings?",
+            "Let's get started. What surprised you about the readings?",
           language: "en",
           prompt: {
             prompt: opts.systemPrompt,
             llm: "gpt-4o",
             temperature: 0.7,
-            max_tokens: 512,
+            max_tokens: 150,
           },
         },
         tts: {

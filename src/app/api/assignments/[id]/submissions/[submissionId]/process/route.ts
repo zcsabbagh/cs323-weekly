@@ -48,7 +48,9 @@ export async function POST(
     submission.transcript = transcript;
 
     // Summarize with Anthropic
-    submission.summary = await summarizeTranscript(transcript, assignment.context);
+    const { summary, score } = await summarizeTranscript(transcript, assignment.context);
+    submission.summary = summary;
+    submission.score = score;
     submission.status = "complete";
   } catch (err) {
     console.error("Processing error:", err);

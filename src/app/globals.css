@@ -96,28 +96,26 @@
 }
 
 @keyframes title-shimmer {
-  0% { background-position: 150% center; }
-  100% { background-position: -50% center; }
+  0% { background-position: 100% center; }
+  100% { background-position: 0% center; }
 }
 
-.title-shimmer {
+.title-golden {
   background: linear-gradient(
     90deg,
     rgba(255,255,255,0.75) 0%,
-    rgba(255,255,255,0.75) 42%,
-    #52525b 44%,
-    #78716c 46%,
-    #a8a29e 48%,
-    #d4d4d8 50%,
-    #a8a29e 52%,
-    #78716c 54%,
-    #52525b 56%,
-    rgba(255,255,255,0.75) 58%,
+    rgba(255,255,255,0.75) 40%,
+    #b45309 45%,
+    #d97706 48%,
+    #fbbf24 50%,
+    #d97706 52%,
+    #b45309 55%,
+    rgba(255,255,255,0.75) 60%,
     rgba(255,255,255,0.75) 100%
   );
-  background-size: 400% 100%;
+  background-size: 300% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: title-shimmer 40s linear;
+  animation: title-shimmer 4s ease-in-out infinite;
 }

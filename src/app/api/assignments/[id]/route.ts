@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAssignment } from "@/lib/db";
+import { getAssignment, deleteAssignment } from "@/lib/db";
 
 export async function GET(
   _req: NextRequest,
@@ -11,4 +11,17 @@ export async function GET(
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
   return NextResponse.json(assignment);
+}
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const assignment = await getAssignment(id);
+  if (!assignment) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+  await deleteAssignment(id);
+  return NextResponse.json({ success: true });
 }

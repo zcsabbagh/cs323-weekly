@@ -12,14 +12,23 @@ export interface Assignment {
   createdAt: string;
 }
 
+export interface Student {
+  id: string;
+  firstName: string;
+  lastName: string;
+  sunnetId: string;
+  createdAt: string;
+}
+
 export interface Submission {
   id: string;
   assignmentId: string;
-  studentName: string;
-  studentId: string;
+  sunnetId: string;
   conversationId: string;
   transcript: string;
   summary: string;
+  score: "pass" | "fail" | "pending";
+  duration: string;
   status: "pending" | "processing" | "complete" | "error";
   createdAt: string;
 }
@@ -58,6 +67,43 @@ export async function saveAssignment(assignment: Assignment) {
   if (idx >= 0) assignments[idx] = assignment;
   else assignments.push(assignment);
   await fs.writeFile(assignmentsFile(), JSON.stringify(assignments, null, 2));
+}
+
+function studentsFile() {
+  return path.join(DATA_DIR, "students.json");
+}
+
+export async function getStudents(): Promise<Student[]> {
+  await ensureDir(DATA_DIR);
+  try {
+    const data = await fs.readFile(studentsFile(), "utf-8");
+    return JSON.parse(data);
+  } catch {
+    return [];
+  }
+}
+
+export async function saveStudent(student: Student) {
+  await ensureDir(DATA_DIR);
+  const students = await getStudents();
+  const idx = students.findIndex((s) => s.id === student.id);
+  if (idx >= 0) students[idx] = student;
+  else students.push(student);
+  await fs.writeFile(studentsFile(), JSON.stringify(students, null, 2));
+}
+
+export async function deleteStudent(id: string) {
+  await ensureDir(DATA_DIR);
+  const students = await getStudents();
+  const filtered = students.filter((s) => s.id !== id);
+  await fs.writeFile(studentsFile(), JSON.stringify(filtered, null, 2));
+}
+
+export async function deleteAssignment(id: string) {
+  await ensureDir(DATA_DIR);
+  const assignments = await getAssignments();
+  const filtered = assignments.filter((a) => a.id !== id);
+  await fs.writeFile(assignmentsFile(), JSON.stringify(filtered, null, 2));
 }
 
 export async function getSubmissions(assignmentId: string): Promise<Submission[]> {

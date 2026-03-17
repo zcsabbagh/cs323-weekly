@@ -3,30 +3,8 @@
 import Link from "next/link";
 import { AsciiHero } from "./ascii-hero";
 import { ShuffleText } from "@/components/shuffle-text";
-import { useEffect, useState } from "react";
 
 export default function Home() {
-  const [shimmer, setShimmer] = useState(false);
-
-  useEffect(() => {
-    const t1 = setTimeout(() => {
-      setShimmer(true);
-      const t2 = setTimeout(() => setShimmer(false), 40000);
-
-      const interval = setInterval(() => {
-        setShimmer(true);
-        setTimeout(() => setShimmer(false), 40000);
-      }, 50000);
-
-      return () => {
-        clearTimeout(t2);
-        clearInterval(interval);
-      };
-    }, 2000);
-
-    return () => clearTimeout(t1);
-  }, []);
-
   return (
     <div className="h-screen w-screen bg-black relative overflow-hidden">
       <AsciiHero />
@@ -51,11 +29,7 @@ export default function Home() {
           <h1 className="font-display text-7xl md:text-9xl font-normal tracking-tight leading-none text-white/90">
             CS 323
           </h1>
-          <p
-            className={`font-display italic text-5xl md:text-7xl mt-2 tracking-tight ${
-              shimmer ? "title-shimmer" : "text-white/75"
-            }`}
-          >
+          <p className="font-display italic text-5xl md:text-7xl mt-2 tracking-tight title-golden">
             The AI Awakening
           </p>
         </div>

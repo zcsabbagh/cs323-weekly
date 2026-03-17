@@ -5,19 +5,20 @@ const client = new Anthropic();
 export async function summarizeTranscript(
   transcript: string,
   context: string
-): Promise<string> {
+): Promise<{ summary: string; score: "pass" | "fail" }> {
   const message = await client.messages.create({
-    model: "claude-sonnet-4-20250514",
+    model: "claude-sonnet-4-6",
     max_tokens: 1024,
     messages: [
       {
         role: "user",
         content: `You are a teaching assistant for CS 323. Below is the context from the assigned readings, followed by a transcript of a student's voice interview about those readings.
 
-Please provide a concise summary (3-5 paragraphs) of:
-1. The student's key opinions and takeaways from the readings
-2. How well they engaged with the material
-3. Any notable insights or areas where understanding could be deeper
+Provide exactly:
+
+1. Three bullet points of the most interesting things the student said. Each bullet should be one sentence. Focus on specific opinions, insights, or connections they made.
+
+2. A pass/fail score. Pass = they clearly read it and can reference specifics. Fail = vague, generic, or couldn't engage with details.
 
 READING CONTEXT:
 ${context}
@@ -25,12 +26,20 @@ ${context}
 INTERVIEW TRANSCRIPT:
 ${transcript}
 
-Write the summary in a professional but warm tone, as if reporting to the course instructor.`,
+Respond in this exact JSON format (no markdown fences):
+{"summary": "• First point\n• Second point\n• Third point", "score": "pass"}`,
       },
     ],
   });
 
   const block = message.content[0];
-  if (block.type === "text") return block.text;
-  return "Summary generation failed.";
+  if (block.type === "text") {
+    try {
+      const parsed = JSON.parse(block.text);
+      return { summary: parsed.summary, score: parsed.score };
+    } catch {
+      return { summary: block.text, score: "fail" };
+    }
+  }
+  return { summary: "Summary generation failed.", score: "fail" };
 }
