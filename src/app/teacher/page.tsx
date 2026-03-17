@@ -10,7 +10,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import type { Assignment } from "@/lib/db";
 
+const TEACHER_PASSWORD = "ebsy";
+
 export default function TeacherPage() {
+  const [authenticated, setAuthenticated] = useState(false);
+  const [password, setPassword] = useState("");
+  const [passwordError, setPasswordError] = useState(false);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState("");
@@ -19,10 +24,29 @@ export default function TeacherPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const stored = sessionStorage.getItem("teacher_auth");
+      if (stored === "true") setAuthenticated(true);
+    }
+  }, []);
+
+  function handleLogin(e: React.FormEvent) {
+    e.preventDefault();
+    if (password === TEACHER_PASSWORD) {
+      setAuthenticated(true);
+      sessionStorage.setItem("teacher_auth", "true");
+      setPasswordError(false);
+    } else {
+      setPasswordError(true);
+    }
+  }
+
+  useEffect(() => {
+    if (!authenticated) return;
     fetch("/api/assignments")
       .then((r) => r.json())
       .then(setAssignments);
-  }, []);
+  }, [authenticated]);
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
@@ -52,16 +76,47 @@ export default function TeacherPage() {
     setLoading(false);
   }
 
+  if (!authenticated) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-8">
+        <form onSubmit={handleLogin} className="w-full max-w-xs space-y-4">
+          <h1 className="text-2xl font-light text-center">
+            Teacher Access
+          </h1>
+          <div className="space-y-2">
+            <Input
+              type="password"
+              value={password}
+              onChange={(e) => {
+                setPassword(e.target.value);
+                setPasswordError(false);
+              }}
+              placeholder="Password"
+              autoFocus
+            />
+            {passwordError && (
+              <p className="text-xs text-destructive">Incorrect password</p>
+            )}
+          </div>
+          <Button type="submit" className="w-full">
+            Enter
+          </Button>
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b border-border px-8 py-5">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <h1 className="font-serif text-2xl font-medium text-foreground">
-            CS 323 Weekly
-          </h1>
+          <Link href="/" className="text-xl font-light text-foreground">
+            CS 323
+          </Link>
           <Button
             onClick={() => setCreating(!creating)}
             variant={creating ? "secondary" : "default"}
+            size="sm"
           >
             {creating ? "Cancel" : "New Assignment"}
           </Button>
@@ -71,7 +126,7 @@ export default function TeacherPage() {
       <main className="max-w-5xl mx-auto px-8 py-8 space-y-6">
         {creating && (
           <Card className="p-6">
-            <h2 className="font-serif text-xl font-medium mb-4">
+            <h2 className="text-lg font-light mb-4">
               Create Assignment
             </h2>
             <form onSubmit={handleCreate} className="space-y-4">
@@ -113,33 +168,27 @@ export default function TeacherPage() {
 
         {assignments.length === 0 && !creating ? (
           <div className="text-center py-20">
-            <p className="text-muted-foreground font-serif text-lg">
-              No assignments yet. Create one to get started.
+            <p className="text-muted-foreground text-sm">
+              No assignments yet.
             </p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2">
             {assignments.map((a) => (
               <Link key={a.id} href={`/teacher/${a.id}`}>
-                <Card className="p-5 hover:bg-accent/50 transition-colors cursor-pointer">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="font-serif text-lg font-medium">
-                        {a.title}
-                      </h3>
-                      {a.description && (
-                        <p className="text-sm text-muted-foreground mt-1">
-                          {a.description}
-                        </p>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <Badge variant="secondary">
-                        {new Date(a.createdAt).toLocaleDateString()}
-                      </Badge>
-                    </div>
+                <div className="flex items-center justify-between py-4 px-1 border-b border-border hover:bg-muted/50 transition-colors cursor-pointer">
+                  <div>
+                    <h3 className="text-sm font-medium">{a.title}</h3>
+                    {a.description && (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {a.description}
+                      </p>
+                    )}
                   </div>
-                </Card>
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(a.createdAt).toLocaleDateString()}
+                  </span>
+                </div>
               </Link>
             ))}
           </div>

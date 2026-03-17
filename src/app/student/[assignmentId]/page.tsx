@@ -2,10 +2,8 @@
 
 import { useState, useCallback, useEffect, use } from "react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import type { Assignment } from "@/lib/db";
 import { useConversation } from "@11labs/react";
 
@@ -31,7 +29,6 @@ export default function StudentPage({
   const conversation = useConversation({
     onConnect: () => {
       setStep("interview");
-      // Start timer
       const interval = setInterval(() => {
         setElapsed((prev) => prev + 1);
       }, 1000);
@@ -54,16 +51,10 @@ export default function StudentPage({
 
   const startInterview = useCallback(async () => {
     try {
-      // Get signed URL from our backend
       const res = await fetch(`/api/assignments/${assignmentId}/signed-url`);
       const { signedUrl } = await res.json();
-
-      // Start ElevenLabs conversation (returns conversation ID)
-      const convId = await conversation.startSession({
-        signedUrl,
-      });
+      const convId = await conversation.startSession({ signedUrl });
       if (convId) setConversationId(convId);
-
       setStep("interview");
     } catch (err) {
       console.error("Failed to start interview:", err);
@@ -72,32 +63,20 @@ export default function StudentPage({
 
   const endInterview = useCallback(async () => {
     if (timerInterval) clearInterval(timerInterval);
-
-    // Get the conversation ID before ending
     const convId = conversation.getId();
     await conversation.endSession();
-
-    if (convId) {
-      setConversationId(convId);
-    }
-
+    if (convId) setConversationId(convId);
     setStep("done");
   }, [conversation, timerInterval]);
 
   const submitInterview = useCallback(async () => {
     if (!conversationId) return;
     setSubmitting(true);
-
     await fetch(`/api/assignments/${assignmentId}/submissions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        studentName,
-        studentId,
-        conversationId,
-      }),
+      body: JSON.stringify({ studentName, studentId, conversationId }),
     });
-
     setSubmitted(true);
     setSubmitting(false);
   }, [assignmentId, studentName, studentId, conversationId]);
@@ -118,9 +97,7 @@ export default function StudentPage({
   if (notFound) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-muted-foreground font-serif text-lg">
-          Assignment not found.
-        </p>
+        <p className="text-sm text-muted-foreground">Assignment not found.</p>
       </div>
     );
   }
@@ -128,20 +105,20 @@ export default function StudentPage({
   if (!assignment) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-muted-foreground">Loading...</p>
+        <p className="text-sm text-muted-foreground">Loading...</p>
       </div>
     );
   }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-8">
-      <Card className="w-full max-w-lg p-8 space-y-6">
+      <div className="w-full max-w-sm space-y-8">
         <div>
-          <h1 className="font-serif text-2xl font-medium text-foreground">
+          <h1 className="text-2xl font-light text-foreground">
             {assignment.title}
           </h1>
           {assignment.description && (
-            <p className="text-sm text-muted-foreground mt-1 font-serif">
+            <p className="text-sm text-muted-foreground mt-1">
               {assignment.description}
             </p>
           )}
@@ -155,8 +132,8 @@ export default function StudentPage({
             }}
             className="space-y-4"
           >
-            <div className="space-y-2">
-              <Label htmlFor="name">Full Name</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="name" className="text-xs">Full Name</Label>
               <Input
                 id="name"
                 value={studentName}
@@ -165,8 +142,8 @@ export default function StudentPage({
                 required
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="sid">Student ID</Label>
+            <div className="space-y-1.5">
+              <Label htmlFor="sid" className="text-xs">Student ID</Label>
               <Input
                 id="sid"
                 value={studentId}
@@ -187,53 +164,50 @@ export default function StudentPage({
 
         {step === "ready" && (
           <div className="space-y-4 text-center">
-            <p className="font-serif text-muted-foreground">
-              When you&apos;re ready, start the interview. You&apos;ll have a
-              5-minute voice conversation about the readings.
+            <p className="text-sm text-muted-foreground">
+              You&apos;ll have a ~5 minute voice conversation about the readings.
             </p>
-            <Button onClick={startInterview} size="lg" className="w-full">
+            <Button onClick={startInterview} className="w-full">
               Start Interview
             </Button>
           </div>
         )}
 
         {step === "interview" && (
-          <div className="space-y-6 text-center">
-            <div className="space-y-2">
-              <Badge
-                variant={elapsed >= 300 ? "destructive" : "secondary"}
-                className="text-lg px-4 py-1 font-mono"
-              >
+          <div className="space-y-8 text-center">
+            <div className="space-y-1">
+              <p className="text-2xl font-mono font-light tabular-nums">
                 {formatTime(elapsed)}
-              </Badge>
-              <p className="text-sm text-muted-foreground">
-                {conversation.isSpeaking
-                  ? "Interviewer is speaking..."
-                  : "Listening..."}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {conversation.isSpeaking ? "Speaking..." : "Listening..."}
               </p>
             </div>
 
-            {/* Pulsing indicator */}
+            {/* Minimal pulsing dot */}
             <div className="flex justify-center">
               <div
-                className={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${
+                className={`w-16 h-16 rounded-full transition-all duration-500 ${
                   conversation.isSpeaking
-                    ? "bg-primary/20 animate-pulse"
-                    : "bg-muted"
+                    ? "bg-foreground/10 scale-110"
+                    : "bg-muted scale-100"
                 }`}
               >
-                <div
-                  className={`w-12 h-12 rounded-full ${
-                    conversation.isSpeaking ? "bg-primary" : "bg-muted-foreground/30"
-                  }`}
-                />
+                <div className="w-full h-full rounded-full flex items-center justify-center">
+                  <div
+                    className={`w-6 h-6 rounded-full transition-all duration-500 ${
+                      conversation.isSpeaking
+                        ? "bg-foreground animate-pulse"
+                        : "bg-muted-foreground/30"
+                    }`}
+                  />
+                </div>
               </div>
             </div>
 
             <Button
               onClick={endInterview}
-              variant="secondary"
-              size="lg"
+              variant="outline"
               className="w-full"
             >
               End Interview
@@ -243,11 +217,11 @@ export default function StudentPage({
 
         {step === "done" && !submitted && (
           <div className="space-y-4 text-center">
-            <p className="font-serif text-muted-foreground">
-              Interview complete! Duration: {formatTime(elapsed)}
+            <p className="text-sm text-muted-foreground">
+              Interview complete &middot; {formatTime(elapsed)}
             </p>
-            <div className="flex gap-3">
-              <Button onClick={restart} variant="secondary" className="flex-1">
+            <div className="flex gap-2">
+              <Button onClick={restart} variant="outline" className="flex-1">
                 Re-record
               </Button>
               <Button
@@ -262,16 +236,14 @@ export default function StudentPage({
         )}
 
         {submitted && (
-          <div className="text-center space-y-2">
-            <p className="font-serif text-lg font-medium text-foreground">
-              Submitted successfully
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Your interview has been recorded and will be processed shortly.
+          <div className="text-center space-y-1">
+            <p className="text-sm font-medium">Submitted</p>
+            <p className="text-xs text-muted-foreground">
+              Your interview will be processed shortly.
             </p>
           </div>
         )}
-      </Card>
+      </div>
     </div>
   );
 }
