@@ -13,7 +13,7 @@ logger.setLevel(logging.INFO)
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env.local"))
 
-API_URL = os.getenv("NEXT_PUBLIC_URL", "http://localhost:3000")
+API_URL = os.getenv("AGENT_API_URL") or os.getenv("NEXT_PUBLIC_URL", "http://localhost:3000")
 TAVUS_REPLICA_ID = os.getenv("TAVUS_REPLICA_ID", "")
 TAVUS_PERSONA_ID = os.getenv("TAVUS_PERSONA_ID", "")
 GCS_BUCKET = os.getenv("GCS_BUCKET", "cs323-recordings")

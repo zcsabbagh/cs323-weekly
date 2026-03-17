@@ -17,15 +17,30 @@ export async function GET(
 }
 
 async function getTranscriptFromStorage(roomName: string): Promise<string | null> {
+  // Try filesystem first (agent may have written directly)
   try {
     const transcript = await fs.readFile(
       path.join(DATA_DIR, "transcripts", `${roomName}.txt`),
       "utf-8"
     );
-    return transcript;
+    if (transcript) return transcript;
   } catch {
-    return null;
+    // fall through to API check
   }
+  // Also check via the transcripts API endpoint (covers agent saving via HTTP)
+  try {
+    const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+      ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+      : `http://localhost:${process.env.PORT || 3000}`;
+    const res = await fetch(`${baseUrl}/api/transcripts?roomName=${encodeURIComponent(roomName)}`);
+    if (res.ok) {
+      const data = await res.json();
+      return data.transcript || null;
+    }
+  } catch {
+    // ignore
+  }
+  return null;
 }
 
 async function processSubmission(assignmentId: string, submissionId: string) {
