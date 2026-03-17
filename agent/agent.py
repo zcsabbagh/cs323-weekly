@@ -124,45 +124,13 @@ async def interview_agent(ctx: agents.JobContext):
         except Exception:
             pass
 
-    # Save transcript when session closes
+    # Use an event to know when the session closes
+    import asyncio
+    session_closed = asyncio.Event()
+
     @session.on("close")
     def on_close():
-        import asyncio
-
-        async def _save():
-            # Try session history first
-            try:
-                history = session.history
-                lines = []
-                for item in history:
-                    role = getattr(item, "role", "")
-                    content = ""
-                    if hasattr(item, "text_content"):
-                        content = item.text_content or ""
-                    elif hasattr(item, "content"):
-                        parts = getattr(item, "content", [])
-                        if isinstance(parts, str):
-                            content = parts
-                        elif isinstance(parts, list):
-                            for p in parts:
-                                if hasattr(p, "text"):
-                                    content += p.text
-                    if content:
-                        label = "Interviewer" if role == "assistant" else "Student"
-                        lines.append(f"{label}: {content}")
-                if lines:
-                    await save_transcript(room_name, lines)
-                    return
-            except Exception as e:
-                print(f"Failed to get session history: {e}")
-
-            # Fallback to real-time collected transcript
-            if transcript_lines:
-                await save_transcript(room_name, transcript_lines)
-            else:
-                print(f"No transcript to save for {room_name}")
-
-        asyncio.create_task(_save())
+        session_closed.set()
 
     await session.start(
         room=ctx.room,
@@ -216,6 +184,29 @@ async def interview_agent(ctx: agents.JobContext):
 
     # Send the first greeting
     await session.generate_reply(instructions=f"Say exactly: {first_message}")
+
+    # Block until session closes, then save transcript
+    await session_closed.wait()
+
+    # Save transcript from real-time collected lines
+    if transcript_lines:
+        await save_transcript(room_name, transcript_lines)
+    else:
+        # Try session.history as fallback
+        try:
+            lines = []
+            for item in session.history:
+                role = getattr(item, "role", "")
+                content = ""
+                if hasattr(item, "text_content"):
+                    content = item.text_content or ""
+                if content:
+                    label = "Interviewer" if role == "assistant" else "Student"
+                    lines.append(f"{label}: {content}")
+            if lines:
+                await save_transcript(room_name, lines)
+        except Exception as e:
+            print(f"Failed to save transcript from history: {e}")
 
 
 def build_system_prompt(context: str, description: str) -> str:
