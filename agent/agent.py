@@ -3,7 +3,7 @@ import os
 
 import httpx
 from dotenv import load_dotenv
-from livekit import agents, api, rtc
+from livekit import agents, api
 from livekit.agents import AgentServer, AgentSession, Agent, RoomOutputOptions
 from livekit.plugins import anthropic, elevenlabs, silero, tavus
 
@@ -24,34 +24,11 @@ class InterviewAgent(Agent):
 server = AgentServer()
 
 
-async def on_session_end(ctx: agents.JobContext) -> None:
-    """Save the transcript to our Next.js API when the session ends."""
-    room_name = ctx.room.name
-    transcript_lines = []
-
-    try:
-        report = ctx.make_session_report()
-        report_dict = report.to_dict()
-        history = report_dict.get("conversation", [])
-        for item in history:
-            role = item.get("role", "")
-            content = item.get("content", "")
-            if not content:
-                continue
-            if role == "assistant":
-                transcript_lines.append(f"Interviewer: {content}")
-            elif role == "user":
-                transcript_lines.append(f"Student: {content}")
-    except Exception as e:
-        print(f"Failed to build session report for {room_name}: {e}")
-
-    # If we got no transcript from the report, try the stored one
-    if not transcript_lines and hasattr(ctx, "_transcript_lines"):
-        transcript_lines = ctx._transcript_lines  # type: ignore
-
-    transcript = "\n\n".join(transcript_lines) if transcript_lines else "Transcript unavailable"
-
-    # POST transcript to our API
+async def save_transcript(room_name: str, transcript_lines: list[str]) -> bool:
+    """POST transcript to our Next.js API. Returns True on success."""
+    transcript = "\n\n".join(transcript_lines) if transcript_lines else ""
+    if not transcript:
+        return False
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.post(
@@ -59,12 +36,14 @@ async def on_session_end(ctx: agents.JobContext) -> None:
                 json={"roomName": room_name, "transcript": transcript},
                 timeout=10,
             )
-            print(f"Saved transcript for {room_name}: status={resp.status_code}")
+            print(f"Saved transcript for {room_name}: status={resp.status_code}, lines={len(transcript_lines)}")
+            return resp.status_code == 200
     except Exception as e:
         print(f"Failed to save transcript for {room_name}: {e}")
+        return False
 
 
-@server.rtc_session(agent_name="cs323-interviewer", on_session_end=on_session_end)
+@server.rtc_session(agent_name="cs323-interviewer")
 async def interview_agent(ctx: agents.JobContext):
     # Extract assignment info from dispatch metadata
     metadata = {}
@@ -75,13 +54,13 @@ async def interview_agent(ctx: agents.JobContext):
             pass
 
     assignment_id = metadata.get("assignmentId", "")
-    system_prompt = metadata.get("systemPrompt", "You are a helpful interviewer.")
+    system_prompt = metadata.get("systemPrompt", "")
     first_message = metadata.get(
         "firstMessage", "Let's get started. What surprised you about the readings?"
     )
 
-    # If system prompt wasn't in metadata (too large), fetch from API
-    if not system_prompt or system_prompt == "You are a helpful interviewer.":
+    # Fetch system prompt from API if not in metadata
+    if not system_prompt:
         if assignment_id:
             try:
                 async with httpx.AsyncClient() as client:
@@ -94,8 +73,14 @@ async def interview_agent(ctx: agents.JobContext):
                         context = assignment.get("context", "")
                         description = assignment.get("description", "")
                         system_prompt = build_system_prompt(context, description)
+                        print(f"Fetched assignment {assignment_id}: context={len(context)} chars")
+                    else:
+                        print(f"Failed to fetch assignment {assignment_id}: {resp.status_code}")
             except Exception as e:
                 print(f"Failed to fetch assignment {assignment_id}: {e}")
+
+    if not system_prompt:
+        system_prompt = "You are a helpful interviewer. Ask about what the student has been reading."
 
     session = AgentSession(
         stt="deepgram/nova-3",
@@ -120,8 +105,9 @@ async def interview_agent(ctx: agents.JobContext):
         first_message=first_message,
     )
 
-    # Collect transcript in real-time as a backup
+    # Collect transcript in real-time
     transcript_lines: list[str] = []
+    room_name = ctx.room.name
 
     @session.on("conversation_item_added")
     def on_item(item):
@@ -138,8 +124,45 @@ async def interview_agent(ctx: agents.JobContext):
         except Exception:
             pass
 
-    # Store on ctx so on_session_end can access it
-    ctx._transcript_lines = transcript_lines  # type: ignore
+    # Save transcript when session closes
+    @session.on("close")
+    def on_close():
+        import asyncio
+
+        async def _save():
+            # Try session history first
+            try:
+                history = session.history
+                lines = []
+                for item in history:
+                    role = getattr(item, "role", "")
+                    content = ""
+                    if hasattr(item, "text_content"):
+                        content = item.text_content or ""
+                    elif hasattr(item, "content"):
+                        parts = getattr(item, "content", [])
+                        if isinstance(parts, str):
+                            content = parts
+                        elif isinstance(parts, list):
+                            for p in parts:
+                                if hasattr(p, "text"):
+                                    content += p.text
+                    if content:
+                        label = "Interviewer" if role == "assistant" else "Student"
+                        lines.append(f"{label}: {content}")
+                if lines:
+                    await save_transcript(room_name, lines)
+                    return
+            except Exception as e:
+                print(f"Failed to get session history: {e}")
+
+            # Fallback to real-time collected transcript
+            if transcript_lines:
+                await save_transcript(room_name, transcript_lines)
+            else:
+                print(f"No transcript to save for {room_name}")
+
+        asyncio.create_task(_save())
 
     await session.start(
         room=ctx.room,
@@ -152,7 +175,6 @@ async def interview_agent(ctx: agents.JobContext):
     # Start recording the room to GCS
     if GCS_BUCKET:
         try:
-            # Read GCP credentials for egress upload
             cred_path = os.getenv(
                 "GOOGLE_APPLICATION_CREDENTIALS",
                 os.path.join(os.path.dirname(__file__), "..", "google-credentials.json"),
