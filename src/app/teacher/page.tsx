@@ -112,40 +112,12 @@ export default function TeacherPage() {
 
     setLoading(true);
 
-    const MAX_UPLOAD_SIZE = 4 * 1024 * 1024; // 4MB
-
-    // Upload each PDF individually (parallel) — large files get text extracted client-side
+    // Upload each PDF individually (parallel) — Railway handles all sizes
     const summaries = await Promise.all(
       fileList.map(async (f) => {
-        let res: Response;
-
-        if (f.size <= MAX_UPLOAD_SIZE) {
-          // Small file — send as binary
-          const fd = new FormData();
-          fd.append("file", f);
-          res = await fetch("/api/upload", { method: "POST", body: fd });
-        } else {
-          // Large file — extract text client-side with pdfjs, send as JSON
-          const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
-          if (typeof window !== "undefined" && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
-            pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
-          }
-          const arrayBuf = await f.arrayBuffer();
-          const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuf) }).promise;
-          let text = "";
-          for (let i = 1; i <= pdf.numPages; i++) {
-            const page = await pdf.getPage(i);
-            const content = await page.getTextContent();
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            text += content.items.map((item: any) => item.str || "").join(" ") + "\n";
-          }
-          res = await fetch("/api/upload", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ fileName: f.name, text }),
-          });
-        }
-
+        const fd = new FormData();
+        fd.append("file", f);
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
         if (!res.ok) throw new Error(`Failed to process ${f.name}`);
         const data = await res.json();
         return data.summary as string;
