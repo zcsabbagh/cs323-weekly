@@ -111,16 +111,26 @@ export default function TeacherPage() {
     if (!title || !fileList.length) return;
 
     setLoading(true);
-    const formData = new FormData();
-    formData.append("title", title);
-    formData.append("description", questions);
-    for (const f of fileList) {
-      formData.append("files", f);
-    }
 
+    // Upload each PDF individually (parallel) — each gets summarized by Claude
+    const summaries = await Promise.all(
+      fileList.map(async (f) => {
+        const fd = new FormData();
+        fd.append("file", f);
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
+        if (!res.ok) throw new Error(`Failed to process ${f.name}`);
+        const data = await res.json();
+        return data.summary as string;
+      })
+    );
+
+    const context = summaries.join("\n\n---\n\n");
+
+    // Create assignment with pre-processed context
     const res = await fetch("/api/assignments", {
       method: "POST",
-      body: formData,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, description: questions, context }),
     });
 
     if (res.ok) {
