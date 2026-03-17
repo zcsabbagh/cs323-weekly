@@ -42,3 +42,8 @@ next-env.d.ts
 
 # data
 /data
+
+# google credentials
+google-credentials.json
+agent/.venv
+agent/.env

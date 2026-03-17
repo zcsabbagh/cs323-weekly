@@ -211,7 +211,7 @@ export default function StudentPage({
 
   return (
     <div className="min-h-screen flex items-center justify-center px-6 py-12">
-      <div className="w-full max-w-2xl">
+      <div className="w-full max-w-5xl">
         <div
           className="rounded-2xl border border-border/40 bg-card/60 backdrop-blur-sm p-8 md:p-10 space-y-8"
           style={{
@@ -571,7 +571,7 @@ function InterviewRoom({
       {/* Video grid — equal sized */}
       <div className="grid grid-cols-2 gap-3">
         {/* Avatar video */}
-        <div className="aspect-video rounded-xl overflow-hidden bg-muted/20 flex items-center justify-center relative">
+        <div className="aspect-[4/3] rounded-xl overflow-hidden bg-muted/20 flex items-center justify-center relative">
           {avatarTrack?.publication?.track ? (
             <VideoTrack
               trackRef={avatarTrack}
@@ -589,7 +589,7 @@ function InterviewRoom({
         </div>
 
         {/* Self video */}
-        <div className="aspect-video rounded-xl overflow-hidden bg-muted/20 flex items-center justify-center relative">
+        <div className="aspect-[4/3] rounded-xl overflow-hidden bg-muted/20 flex items-center justify-center relative">
           {selfTrack?.publication?.track ? (
             <VideoTrack
               trackRef={selfTrack}

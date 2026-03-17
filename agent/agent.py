@@ -3,7 +3,7 @@ import os
 
 import httpx
 from dotenv import load_dotenv
-from livekit import agents, rtc
+from livekit import agents, api, rtc
 from livekit.agents import AgentServer, AgentSession, Agent, RoomOutputOptions
 from livekit.plugins import anthropic, elevenlabs, silero, tavus
 
@@ -12,6 +12,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env.local"))
 API_URL = os.getenv("NEXT_PUBLIC_URL", "http://localhost:3000")
 TAVUS_REPLICA_ID = os.getenv("TAVUS_REPLICA_ID", "")
 TAVUS_PERSONA_ID = os.getenv("TAVUS_PERSONA_ID", "")
+GCS_BUCKET = os.getenv("GCS_BUCKET", "cs323-recordings")
 
 
 class InterviewAgent(Agent):
@@ -119,6 +120,49 @@ async def interview_agent(ctx: agents.JobContext):
             audio_enabled=True,
         ),
     )
+
+    # Start recording the room to GCS
+    if GCS_BUCKET:
+        try:
+            # Read GCP credentials for egress upload
+            cred_path = os.getenv(
+                "GOOGLE_APPLICATION_CREDENTIALS",
+                os.path.join(os.path.dirname(__file__), "..", "google-credentials.json"),
+            )
+            gcp_creds = ""
+            try:
+                with open(cred_path) as f:
+                    gcp_creds = f.read()
+            except FileNotFoundError:
+                print(f"GCP credentials not found at {cred_path}")
+
+            from livekit.protocol.egress import (
+                RoomCompositeEgressRequest,
+                EncodedFileOutput,
+                EncodedFileType,
+                GCPUpload,
+            )
+
+            lk = api.LiveKitAPI()
+            await lk.egress.start_room_composite_egress(
+                RoomCompositeEgressRequest(
+                    room_name=ctx.room.name,
+                    file_outputs=[
+                        EncodedFileOutput(
+                            file_type=EncodedFileType.MP4,
+                            filepath=f"{ctx.room.name}.mp4",
+                            gcp=GCPUpload(
+                                bucket=GCS_BUCKET,
+                                credentials=gcp_creds,
+                            ),
+                        ),
+                    ],
+                ),
+            )
+            print(f"Started egress recording for {ctx.room.name}")
+            await lk.aclose()
+        except Exception as e:
+            print(f"Failed to start egress: {e}")
 
     # Send the first greeting
     await session.generate_reply(instructions=f"Say exactly: {first_message}")
