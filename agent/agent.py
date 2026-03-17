@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 
 import httpx
@@ -6,6 +7,9 @@ from dotenv import load_dotenv
 from livekit import agents, api
 from livekit.agents import AgentServer, AgentSession, Agent, RoomOutputOptions
 from livekit.plugins import anthropic, elevenlabs, silero, tavus
+
+logger = logging.getLogger("cs323-agent")
+logger.setLevel(logging.INFO)
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env.local"))
 
@@ -36,10 +40,10 @@ async def save_transcript(room_name: str, transcript_lines: list[str]) -> bool:
                 json={"roomName": room_name, "transcript": transcript},
                 timeout=10,
             )
-            print(f"Saved transcript for {room_name}: status={resp.status_code}, lines={len(transcript_lines)}")
+            logger.info(f"Saved transcript for {room_name}: status={resp.status_code}, lines={len(transcript_lines)}")
             return resp.status_code == 200
     except Exception as e:
-        print(f"Failed to save transcript for {room_name}: {e}")
+        logger.info(f"Failed to save transcript for {room_name}: {e}")
         return False
 
 
@@ -73,11 +77,11 @@ async def interview_agent(ctx: agents.JobContext):
                         context = assignment.get("context", "")
                         description = assignment.get("description", "")
                         system_prompt = build_system_prompt(context, description)
-                        print(f"Fetched assignment {assignment_id}: context={len(context)} chars")
+                        logger.info(f"Fetched assignment {assignment_id}: context={len(context)} chars")
                     else:
-                        print(f"Failed to fetch assignment {assignment_id}: {resp.status_code}")
+                        logger.info(f"Failed to fetch assignment {assignment_id}: {resp.status_code}")
             except Exception as e:
-                print(f"Failed to fetch assignment {assignment_id}: {e}")
+                logger.info(f"Failed to fetch assignment {assignment_id}: {e}")
 
     if not system_prompt:
         system_prompt = "You are a helpful interviewer. Ask about what the student has been reading."
@@ -110,27 +114,26 @@ async def interview_agent(ctx: agents.JobContext):
     room_name = ctx.room.name
 
     @session.on("conversation_item_added")
-    def on_item(item):
+    def on_item(event):
         try:
-            role = getattr(item, "role", "")
-            content = ""
-            if hasattr(item, "text_content"):
-                content = item.text_content or ""
-            elif hasattr(item, "content"):
-                content = str(item.content) if item.content else ""
+            msg = event.item
+            role = getattr(msg, "role", "")
+            content = getattr(msg, "text_content", None) or ""
             if content:
                 label = "Interviewer" if role == "assistant" else "Student"
                 transcript_lines.append(f"{label}: {content}")
         except Exception:
             pass
 
-    # Use an event to know when the session closes
+    # Wait for participant to leave, then save transcript
     import asyncio
-    session_closed = asyncio.Event()
+    participant_left = asyncio.Event()
 
-    @session.on("close")
-    def on_close():
-        session_closed.set()
+    @ctx.room.on("participant_disconnected")
+    def on_participant_left(participant):
+        if participant.identity != ctx.room.local_participant.identity:
+            logger.info(f"Participant left: {participant.identity}")
+            participant_left.set()
 
     await session.start(
         room=ctx.room,
@@ -152,7 +155,7 @@ async def interview_agent(ctx: agents.JobContext):
                 with open(cred_path) as f:
                     gcp_creds = f.read()
             except FileNotFoundError:
-                print(f"GCP credentials not found at {cred_path}")
+                logger.info(f"GCP credentials not found at {cred_path}")
 
             from livekit.protocol.egress import (
                 RoomCompositeEgressRequest,
@@ -177,36 +180,35 @@ async def interview_agent(ctx: agents.JobContext):
                     ],
                 ),
             )
-            print(f"Started egress recording for {ctx.room.name}")
+            logger.info(f"Started egress recording for {ctx.room.name}")
             await lk.aclose()
         except Exception as e:
-            print(f"Failed to start egress: {e}")
+            logger.info(f"Failed to start egress: {e}")
 
     # Send the first greeting
     await session.generate_reply(instructions=f"Say exactly: {first_message}")
 
-    # Block until session closes, then save transcript
-    await session_closed.wait()
+    # Block until participant leaves, then save transcript
+    await participant_left.wait()
+    # Small delay to let final conversation items settle
+    await asyncio.sleep(2)
 
-    # Save transcript from real-time collected lines
     if transcript_lines:
         await save_transcript(room_name, transcript_lines)
     else:
         # Try session.history as fallback
         try:
             lines = []
-            for item in session.history:
-                role = getattr(item, "role", "")
-                content = ""
-                if hasattr(item, "text_content"):
-                    content = item.text_content or ""
+            for msg in session.history.messages():
+                role = getattr(msg, "role", "")
+                content = getattr(msg, "text_content", None) or ""
                 if content:
                     label = "Interviewer" if role == "assistant" else "Student"
                     lines.append(f"{label}: {content}")
             if lines:
                 await save_transcript(room_name, lines)
         except Exception as e:
-            print(f"Failed to save transcript from history: {e}")
+            logger.info(f"Failed to save transcript from history: {e}")
 
 
 def build_system_prompt(context: str, description: str) -> str:

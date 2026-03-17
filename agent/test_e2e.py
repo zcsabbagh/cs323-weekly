@@ -14,9 +14,9 @@ load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env.local"))
 LIVEKIT_URL = os.getenv("LIVEKIT_URL", "")
 LIVEKIT_API_KEY = os.getenv("LIVEKIT_API_KEY", "")
 LIVEKIT_API_SECRET = os.getenv("LIVEKIT_API_SECRET", "")
-API_URL = os.getenv("NEXT_PUBLIC_URL", "http://localhost:3005")
-# Use Railway in production
+# Token comes from Railway (production dispatch), transcript saved to local agent API
 RAILWAY_URL = "https://cs323-weekly-production.up.railway.app"
+API_URL = os.getenv("NEXT_PUBLIC_URL", "http://localhost:3005")
 ASSIGNMENT_ID = "0962ec28-f80a-4900-b2ed-6230bbd0ccfd"
 
 
@@ -119,12 +119,17 @@ async def main():
     print("  Disconnected. Waiting 15s for agent to save transcript...")
     await asyncio.sleep(15)
 
-    # Check if transcript was saved
+    # Check if transcript was saved — try Railway first, then local
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             f"{RAILWAY_URL}/api/transcripts?roomName={room_name}",
             timeout=10,
         )
+        if resp.status_code != 200:
+            resp = await client.get(
+                f"{API_URL}/api/transcripts?roomName={room_name}",
+                timeout=10,
+            )
         if resp.status_code == 200:
             data = resp.json()
             transcript = data.get("transcript", "")
