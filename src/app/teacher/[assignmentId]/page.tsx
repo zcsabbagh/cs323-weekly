@@ -1,5 +1,6 @@
 "use client";
 
+import { api } from "@/lib/api";
 import { useState, useEffect, use } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -47,13 +48,13 @@ export default function AssignmentDetailPage({
   }
 
   useEffect(() => {
-    fetch(`/api/assignments/${assignmentId}`)
+    api(`/api/assignments/${assignmentId}`)
       .then((r) => r.json())
       .then(setAssignment);
-    fetch(`/api/assignments/${assignmentId}/submissions`)
+    api(`/api/assignments/${assignmentId}/submissions`)
       .then((r) => r.json())
       .then(setSubmissions);
-    fetch("/api/students")
+    api("/api/students")
       .then((r) => r.json())
       .then(setStudents);
   }, [assignmentId]);

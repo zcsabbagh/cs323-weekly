@@ -1,5 +1,6 @@
 "use client";
 
+import { api } from "@/lib/api";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import confetti from "canvas-confetti";
@@ -38,7 +39,9 @@ export default function TeacherPage() {
   const [title, setTitle] = useState("");
   const [questions, setQuestions] = useState("");
   const [additionalContext, setAdditionalContext] = useState("");
-  const [fileList, setFileList] = useState<File[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<
+    { name: string; size: number; status: "uploading" | "done" | "error"; summary: string }[]
+  >([]);
   const [interviewEnabled, setInterviewEnabled] = useState(true);
   const [loading, setLoading] = useState(false);
   const [createdLink, setCreatedLink] = useState<string | null>(null);
@@ -81,13 +84,13 @@ export default function TeacherPage() {
   // Fetch assignments
   useEffect(() => {
     if (!authenticated) return;
-    fetch("/api/assignments")
+    api("/api/assignments")
       .then((r) => r.json())
       .then((data: Assignment[]) => {
         setAssignments(data);
         // Fetch submission counts for each
         data.forEach((a) => {
-          fetch(`/api/assignments/${a.id}/submissions`)
+          api(`/api/assignments/${a.id}/submissions`)
             .then((r) => r.json())
             .then((subs: unknown[]) => {
               setSubmissionCounts((prev) => ({
@@ -102,33 +105,55 @@ export default function TeacherPage() {
   // Fetch students
   useEffect(() => {
     if (!authenticated) return;
-    fetch("/api/students")
+    api("/api/students")
       .then((r) => r.json())
       .then(setStudents);
   }, [authenticated]);
 
+  async function handleAddFiles(newFiles: File[]) {
+    const startIdx = uploadedFiles.length;
+    // Add placeholders
+    const placeholders = newFiles.map((f) => ({
+      name: f.name,
+      size: f.size,
+      status: "uploading" as const,
+      summary: "",
+    }));
+    setUploadedFiles((prev) => [...prev, ...placeholders]);
+
+    // Upload each in parallel
+    await Promise.all(
+      newFiles.map(async (f, i) => {
+        try {
+          const fd = new FormData();
+          fd.append("file", f);
+          const res = await api("/api/upload", { method: "POST", body: fd });
+          if (!res.ok) throw new Error("Upload failed");
+          const data = await res.json();
+          setUploadedFiles((prev) =>
+            prev.map((item, j) =>
+              j === startIdx + i ? { ...item, status: "done", summary: data.summary } : item
+            )
+          );
+        } catch {
+          setUploadedFiles((prev) =>
+            prev.map((item, j) =>
+              j === startIdx + i ? { ...item, status: "error" } : item
+            )
+          );
+        }
+      })
+    );
+  }
+
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
-    if (!title || (!fileList.length && !additionalContext.trim())) return;
+    const doneSummaries = uploadedFiles.filter((f) => f.status === "done").map((f) => f.summary);
+    if (!title || (!doneSummaries.length && !additionalContext.trim())) return;
 
     setLoading(true);
 
-    // Upload each PDF individually (parallel) — Railway handles all sizes
-    const parts: string[] = [];
-
-    if (fileList.length > 0) {
-      const summaries = await Promise.all(
-        fileList.map(async (f) => {
-          const fd = new FormData();
-          fd.append("file", f);
-          const res = await fetch("/api/upload", { method: "POST", body: fd });
-          if (!res.ok) throw new Error(`Failed to process ${f.name}`);
-          const data = await res.json();
-          return data.summary as string;
-        })
-      );
-      parts.push(...summaries);
-    }
+    const parts: string[] = [...doneSummaries];
 
     if (additionalContext.trim()) {
       parts.push(`## Additional Context\n\n${additionalContext.trim()}`);
@@ -137,7 +162,7 @@ export default function TeacherPage() {
     const context = parts.join("\n\n---\n\n");
 
     // Create assignment with pre-processed context
-    const res = await fetch("/api/assignments", {
+    const res = await api("/api/assignments", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title, description: questions, context }),
@@ -152,7 +177,7 @@ export default function TeacherPage() {
       setTitle("");
       setQuestions("");
       setAdditionalContext("");
-      setFileList([]);
+      setUploadedFiles([]);
       if (fileInputRef.current) fileInputRef.current.value = "";
       confetti();
     }
@@ -167,17 +192,9 @@ export default function TeacherPage() {
     e.stopPropagation();
     if (!confirm("Delete this assignment?")) return;
 
-    // Try proxy first, fall back to direct Railway call
-    let res = await fetch(`/api/assignments/${assignmentId}`, {
+    const res = await api(`/api/assignments/${assignmentId}`, {
       method: "DELETE",
     });
-    if (!res.ok) {
-      // Vercel proxy may not forward DELETE — call Railway directly
-      res = await fetch(
-        `https://cs323-weekly-production.up.railway.app/api/assignments/${assignmentId}`,
-        { method: "DELETE" }
-      );
-    }
     if (res.ok) {
       setAssignments((prev) => prev.filter((a) => a.id !== assignmentId));
     }
@@ -190,7 +207,7 @@ export default function TeacherPage() {
     setStudentLoading(true);
     setStudentError("");
 
-    const res = await fetch("/api/students", {
+    const res = await api("/api/students", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -482,7 +499,7 @@ export default function TeacherPage() {
                     e.preventDefault();
                     e.stopPropagation();
                     if (e.dataTransfer.files.length) {
-                      setFileList((prev) => [...prev, ...Array.from(e.dataTransfer.files)]);
+                      handleAddFiles(Array.from(e.dataTransfer.files));
                     }
                   }}
                   className="border-2 border-dashed border-border/60 hover:border-border rounded-lg p-6 text-center cursor-pointer transition-colors"
@@ -493,7 +510,7 @@ export default function TeacherPage() {
                     accept=".pdf"
                     multiple
                     className="hidden"
-                    onChange={(e) => { if (e.target.files) setFileList((prev) => [...prev, ...Array.from(e.target.files!)]); }}
+                    onChange={(e) => { if (e.target.files) handleAddFiles(Array.from(e.target.files)); }}
                   />
                   <div className="text-muted-foreground">
                     <svg className="mx-auto h-8 w-8 mb-2 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -506,24 +523,35 @@ export default function TeacherPage() {
                 </div>
 
                 {/* File preview list */}
-                {fileList.length > 0 && (
+                {uploadedFiles.length > 0 && (
                   <div className="space-y-1.5 mt-2">
-                    {fileList.map((f, i) => (
+                    {uploadedFiles.map((f, i) => (
                       <div
                         key={i}
                         className="flex items-center gap-2 px-3 py-2 rounded-md bg-muted/50 border border-border/30"
                       >
-                        <svg className="h-4 w-4 text-muted-foreground shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
-                        </svg>
+                        {f.status === "uploading" ? (
+                          <svg className="h-4 w-4 text-muted-foreground shrink-0 animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182M20.015 4.356v4.992" />
+                          </svg>
+                        ) : f.status === "error" ? (
+                          <svg className="h-4 w-4 text-destructive shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                          </svg>
+                        ) : (
+                          <svg className="h-4 w-4 text-green-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                          </svg>
+                        )}
                         <span className="text-sm truncate flex-1">{f.name}</span>
                         <span className="text-xs text-muted-foreground shrink-0">
                           {(f.size / 1024).toFixed(0)} KB
                         </span>
                         <button
                           type="button"
-                          onClick={() => setFileList((prev) => prev.filter((_, j) => j !== i))}
+                          onClick={() => setUploadedFiles((prev) => prev.filter((_, j) => j !== i))}
                           className="text-muted-foreground hover:text-destructive transition-colors shrink-0"
+                          style={{ transitionProperty: "color" }}
                         >
                           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
@@ -546,7 +574,7 @@ export default function TeacherPage() {
                   onChange={(e) => setAdditionalContext(e.target.value)}
                   placeholder="Paste article text, lecture notes, or any other reading material..."
                   rows={4}
-                  className="text-base"
+                  className="text-base resize-none max-h-40 overflow-y-auto"
                 />
               </div>
 
@@ -579,7 +607,7 @@ export default function TeacherPage() {
               </div>
               <Button
                 type="submit"
-                disabled={loading || !title || (!fileList.length && !additionalContext.trim())}
+                disabled={loading || !title || (!uploadedFiles.some((f) => f.status === "done") && !additionalContext.trim()) || uploadedFiles.some((f) => f.status === "uploading")}
                 className="w-full h-12 text-base"
               >
                 {loading ? "Publishing..." : "Publish"}

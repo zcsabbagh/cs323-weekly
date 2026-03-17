@@ -1,5 +1,6 @@
 "use client";
 
+import { api } from "@/lib/api";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { Assignment } from "@/lib/db";
@@ -9,7 +10,7 @@ export default function StudentLanding() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/assignments")
+    api("/api/assignments")
       .then((r) => r.json())
       .then((data) => {
         setAssignments(data);

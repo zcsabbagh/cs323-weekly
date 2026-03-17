@@ -1,5 +1,6 @@
 "use client";
 
+import { api } from "@/lib/api";
 import { useState, useCallback, useEffect, use } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,7 +52,7 @@ export default function StudentPage({
   });
 
   useEffect(() => {
-    fetch(`/api/assignments/${assignmentId}`)
+    api(`/api/assignments/${assignmentId}`)
       .then((r) => {
         if (!r.ok) throw new Error("Not found");
         return r.json();
@@ -65,7 +66,7 @@ export default function StudentPage({
 
   const startInterview = useCallback(async () => {
     try {
-      const res = await fetch(`/api/assignments/${assignmentId}/signed-url`);
+      const res = await api(`/api/assignments/${assignmentId}/signed-url`);
       const { signedUrl } = await res.json();
       const convId = await conversation.startSession({ signedUrl });
       if (convId) setConversationId(convId);
@@ -86,7 +87,7 @@ export default function StudentPage({
   const submitInterview = useCallback(async () => {
     if (!conversationId || !sunnetId.trim()) return;
     setSubmitting(true);
-    const res = await fetch(`/api/assignments/${assignmentId}/submissions`, {
+    const res = await api(`/api/assignments/${assignmentId}/submissions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sunnetId, conversationId, duration: formatTime(INTERVIEW_DURATION - elapsed) }),
