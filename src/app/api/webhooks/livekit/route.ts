@@ -102,9 +102,10 @@ export async function POST(req: NextRequest) {
     const submission = submissions.find((s) => s.conversationId === roomName);
     const sunnetId = submission?.sunnetId || "unknown";
 
-    // Build a nice filename: sunnetId_roomName_timestamp.mp4
+    // Build a nice filename: sunnetId_date_submissionId.mp4
     const timestamp = new Date().toISOString().slice(0, 10);
-    const uploadName = `${sunnetId}_${roomName}_${timestamp}.mp4`;
+    const submissionId = submission?.id || roomName;
+    const uploadName = `${sunnetId}_${timestamp}_${submissionId}.mp4`;
 
     // Upload to Google Drive
     const driveLink = await uploadToDrive({
