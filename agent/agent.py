@@ -114,7 +114,18 @@ async def interview_agent(ctx: agents.JobContext):
             await _asyncio.wait_for(avatar.start(session, room=ctx.room), timeout=15)
             logger.info("Tavus avatar started")
         except Exception as e:
-            logger.info(f"TAVUS_FAILED replica={TAVUS_REPLICA_ID} persona={TAVUS_PERSONA_ID} error={type(e).__name__}: {e}")
+            err_msg = f"TAVUS_FAILED replica={TAVUS_REPLICA_ID} persona={TAVUS_PERSONA_ID} error={type(e).__name__}: {e}"
+            logger.info(err_msg)
+            print(err_msg, flush=True)
+            # Post error to Railway so we can see it in Railway logs
+            try:
+                import asyncio as _asyncio2
+                async def _post_err():
+                    async with httpx.AsyncClient() as c:
+                        await c.post(f"{API_URL}/api/agent-debug", json={"msg": err_msg}, timeout=5)
+                _asyncio2.create_task(_post_err())
+            except Exception:
+                pass
 
     agent = InterviewAgent(
         system_prompt=system_prompt,
