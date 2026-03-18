@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { WebhookReceiver } from "livekit-server-sdk";
 import { Storage } from "@google-cloud/storage";
 import { uploadToDrive } from "@/lib/google-drive";
-import { getAssignments } from "@/lib/db";
+import { getAssignments, getSubmissions } from "@/lib/db";
 import path from "path";
 
 const receiver = new WebhookReceiver(
@@ -97,9 +97,14 @@ export async function POST(req: NextRequest) {
 
     const readStream = file.createReadStream();
 
-    // Build a nice filename: roomName_timestamp.mp4
+    // Look up the student's SUNet ID from their submission
+    const submissions = await getSubmissions(assignmentId);
+    const submission = submissions.find((s) => s.conversationId === roomName);
+    const sunnetId = submission?.sunnetId || "unknown";
+
+    // Build a nice filename: sunnetId_roomName_timestamp.mp4
     const timestamp = new Date().toISOString().slice(0, 10);
-    const uploadName = `${roomName}_${timestamp}.mp4`;
+    const uploadName = `${sunnetId}_${roomName}_${timestamp}.mp4`;
 
     // Upload to Google Drive
     const driveLink = await uploadToDrive({
