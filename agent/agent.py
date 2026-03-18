@@ -13,6 +13,10 @@ logger.setLevel(logging.INFO)
 _fh = logging.FileHandler("/tmp/cs323-agent-debug.log")
 _fh.setLevel(logging.INFO)
 logger.addHandler(_fh)
+# Also log to stdout so LiveKit Cloud captures it
+_sh = logging.StreamHandler()
+_sh.setLevel(logging.INFO)
+logger.addHandler(_sh)
 
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env.local"))
 
@@ -110,7 +114,7 @@ async def interview_agent(ctx: agents.JobContext):
             await _asyncio.wait_for(avatar.start(session, room=ctx.room), timeout=15)
             logger.info("Tavus avatar started")
         except Exception as e:
-            logger.info(f"Tavus avatar failed (continuing without): {e}")
+            logger.info(f"TAVUS_FAILED replica={TAVUS_REPLICA_ID} persona={TAVUS_PERSONA_ID} error={type(e).__name__}: {e}")
 
     agent = InterviewAgent(
         system_prompt=system_prompt,
