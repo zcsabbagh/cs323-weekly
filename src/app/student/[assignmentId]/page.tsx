@@ -484,6 +484,61 @@ function InterviewRoom({
     roomRef.current = room;
   }, [room, roomRef]);
 
+  // Log connection state changes
+  useEffect(() => {
+    console.log(`[Interview] connectionState=${connectionState} ts=${Date.now()}`);
+  }, [connectionState]);
+
+  // Log video track changes
+  useEffect(() => {
+    const tracks = videoTracks.map((t) => ({
+      participant: t.participant.identity,
+      isLocal: t.participant.isLocal,
+      hasTrack: !!t.publication?.track,
+      source: t.source,
+    }));
+    console.log(`[Interview] videoTracks updated (${videoTracks.length}):`, tracks, `ts=${Date.now()}`);
+  }, [videoTracks]);
+
+  // Log room events — participants joining/leaving and track subscriptions
+  useEffect(() => {
+    if (!room) return;
+    const joinedAt = Date.now();
+
+    const onParticipantConnected = (p: Participant) => {
+      console.log(`[Interview] participant connected: identity=${p.identity} elapsed=${Date.now() - joinedAt}ms`);
+    };
+    const onParticipantDisconnected = (p: Participant) => {
+      console.log(`[Interview] participant disconnected: identity=${p.identity} elapsed=${Date.now() - joinedAt}ms`);
+    };
+    const onTrackSubscribed = (track: unknown, _pub: unknown, participant: Participant) => {
+      const t = track as { kind: string };
+      console.log(`[Interview] track subscribed: kind=${t.kind} participant=${participant.identity} elapsed=${Date.now() - joinedAt}ms`);
+    };
+    const onTrackUnsubscribed = (track: unknown, _pub: unknown, participant: Participant) => {
+      const t = track as { kind: string };
+      console.log(`[Interview] track unsubscribed: kind=${t.kind} participant=${participant.identity}`);
+    };
+
+    room.on(RoomEvent.ParticipantConnected, onParticipantConnected);
+    room.on(RoomEvent.ParticipantDisconnected, onParticipantDisconnected);
+    room.on(RoomEvent.TrackSubscribed, onTrackSubscribed);
+    room.on(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed);
+
+    // Log existing participants immediately
+    const existing = Array.from(room.remoteParticipants.values());
+    console.log(`[Interview] room connected, existing remote participants (${existing.length}):`,
+      existing.map((p) => ({ identity: p.identity, trackCount: p.trackPublications.size }))
+    );
+
+    return () => {
+      room.off(RoomEvent.ParticipantConnected, onParticipantConnected);
+      room.off(RoomEvent.ParticipantDisconnected, onParticipantDisconnected);
+      room.off(RoomEvent.TrackSubscribed, onTrackSubscribed);
+      room.off(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed);
+    };
+  }, [room]);
+
   // Listen for transcription events
   useEffect(() => {
     if (!room) return;
@@ -540,8 +595,11 @@ function InterviewRoom({
   // Start timer when avatar video first appears
   useEffect(() => {
     if (avatarTrack?.publication?.track && !timerStarted) {
+      console.log(`[Interview] avatarTrack ready — starting timer. participant=${avatarTrack.participant.identity}`);
       setTimerStarted(true);
       onAvatarReady();
+    } else if (!avatarTrack?.publication?.track) {
+      console.log(`[Interview] avatarTrack not ready: avatarTrack=${!!avatarTrack} track=${!!avatarTrack?.publication?.track}`);
     }
   }, [avatarTrack, timerStarted, onAvatarReady]);
 
