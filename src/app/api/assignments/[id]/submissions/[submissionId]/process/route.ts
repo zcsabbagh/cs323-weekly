@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSubmission, saveSubmission, getAssignment } from "@/lib/db";
-import { summarizeTranscript } from "@/lib/anthropic";
 import fs from "fs/promises";
 import path from "path";
 
@@ -52,10 +51,6 @@ export async function POST(
     }
 
     submission.transcript = transcript;
-
-    const { summary, score } = await summarizeTranscript(transcript, assignment.context);
-    submission.summary = summary;
-    submission.score = score;
     submission.status = "complete";
   } catch (err) {
     console.error("Processing error:", err);
