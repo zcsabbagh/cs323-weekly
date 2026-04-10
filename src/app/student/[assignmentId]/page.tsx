@@ -85,6 +85,9 @@ export default function StudentPage({
   const recordingBlobRef = useRef<Blob | null>(null);
   const durationRef = useRef(0);
 
+  // Audio playback ref for remote participant
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+
   function formatTime(secs: number) {
     const m = Math.floor(secs / 60)
       .toString()
@@ -134,29 +137,66 @@ export default function StudentPage({
         replicaVideoRef.current.srcObject = stream;
       }
     }
-  }, []);
 
-  const startRecording = useCallback(() => {
+    // Attach remote audio for playback
+    if (remoteParticipant?.tracks?.audio?.persistentTrack) {
+      if (!remoteAudioRef.current) {
+        remoteAudioRef.current = new Audio();
+        remoteAudioRef.current.autoplay = true;
+      }
+      const audioStream = new MediaStream([remoteParticipant.tracks.audio.persistentTrack]);
+      if (remoteAudioRef.current.srcObject !== audioStream) {
+        remoteAudioRef.current.srcObject = audioStream;
+        remoteAudioRef.current.play().catch(() => {});
+      }
+    }
+
+    // Try to start recording once tracks are available
+    tryStartRecording();
+  }, [tryStartRecording]);
+
+  // Try to start recording — needs remote video + audio tracks to be ready
+  const tryStartRecording = useCallback(() => {
+    // Already recording
+    if (recorderRef.current) return;
+
     const callObject = callObjectRef.current;
     if (!callObject) return;
 
     const participants = callObject.participants();
-    const audioTracks: MediaStreamTrack[] = [];
+    const tracks: MediaStreamTrack[] = [];
 
-    for (const p of Object.values(participants) as DailyParticipant[]) {
-      if (p.tracks?.audio?.persistentTrack) {
-        audioTracks.push(p.tracks.audio.persistentTrack);
+    // Collect remote participant's video and audio
+    for (const [id, p] of Object.entries(participants)) {
+      if (id === "local") continue;
+      const dp = p as DailyParticipant;
+      if (dp.tracks?.video?.persistentTrack) {
+        tracks.push(dp.tracks.video.persistentTrack);
+      }
+      if (dp.tracks?.audio?.persistentTrack) {
+        tracks.push(dp.tracks.audio.persistentTrack);
       }
     }
 
-    if (audioTracks.length === 0) return;
+    // Also capture local audio (student's mic)
+    const local = participants.local;
+    if (local?.tracks?.audio?.persistentTrack) {
+      tracks.push(local.tracks.audio.persistentTrack);
+    }
 
-    const stream = new MediaStream(audioTracks);
+    // Need at least video + one audio track before starting
+    const hasVideo = tracks.some((t) => t.kind === "video");
+    const hasAudio = tracks.some((t) => t.kind === "audio");
+    if (!hasVideo || !hasAudio) return;
+
+    const stream = new MediaStream(tracks);
     chunksRef.current = [];
 
-    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-      ? "audio/webm;codecs=opus"
-      : "audio/webm";
+    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
+      ? "video/webm;codecs=vp8,opus"
+      : MediaRecorder.isTypeSupported("video/webm")
+        ? "video/webm"
+        : "video/mp4";
 
     const recorder = new MediaRecorder(stream, { mimeType });
     recorder.ondataavailable = (e) => {
@@ -164,6 +204,7 @@ export default function StudentPage({
     };
     recorder.start(1000);
     recorderRef.current = recorder;
+    console.log("[Recording] Started with", tracks.length, "tracks, mimeType:", mimeType);
   }, []);
 
   useEffect(() => {
@@ -205,18 +246,10 @@ export default function StudentPage({
         if (!event) return;
         attachTracks();
 
-        // When remote participant joins, start recording and timer
+        // When remote participant joins, start timer (recording starts via attachTracks)
         if (!event.participant.local) {
           setRemoteJoined(true);
-          startRecording();
           startTimer();
-          // Also attach audio for playback
-          const audioTrack = event.participant.tracks?.audio?.persistentTrack;
-          if (audioTrack) {
-            const audioEl = new Audio();
-            audioEl.srcObject = new MediaStream([audioTrack]);
-            audioEl.play().catch(() => {});
-          }
         }
       });
 
@@ -235,7 +268,7 @@ export default function StudentPage({
       console.error("Failed to start interview:", err);
       setStep("ready");
     }
-  }, [assignmentId, attachTracks, startRecording, startTimer, timerInterval]);
+  }, [assignmentId, attachTracks, startTimer, timerInterval]);
 
   const endInterview = useCallback(async () => {
     if (timerInterval) clearInterval(timerInterval);
@@ -275,6 +308,12 @@ export default function StudentPage({
     }
     chunksRef.current = [];
     recordingBlobRef.current = null;
+
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.pause();
+      remoteAudioRef.current.srcObject = null;
+      remoteAudioRef.current = null;
+    }
 
     const callObject = callObjectRef.current;
     if (callObject) {
@@ -316,7 +355,8 @@ export default function StudentPage({
         setUploadingRecording(true);
         try {
           const formData = new FormData();
-          formData.append("recording", blob, "recording.webm");
+          const ext = blob.type.includes("mp4") ? "mp4" : "webm";
+          formData.append("recording", blob, `recording.${ext}`);
           formData.append("assignmentId", assignmentId);
           formData.append("submissionId", sid);
           formData.append("sunnetId", sunnetId);
