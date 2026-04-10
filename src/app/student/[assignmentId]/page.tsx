@@ -110,51 +110,6 @@ export default function StudentPage({
     setTimerInterval(interval);
   }, []);
 
-  // Attach video tracks when participants update
-  const attachTracks = useCallback(() => {
-    const callObject = callObjectRef.current;
-    if (!callObject) return;
-
-    const participants = callObject.participants();
-
-    // Local participant video
-    const local = participants.local;
-    if (local?.tracks?.video?.persistentTrack && selfVideoRef.current) {
-      const stream = new MediaStream([local.tracks.video.persistentTrack]);
-      if (selfVideoRef.current.srcObject !== stream) {
-        selfVideoRef.current.srcObject = stream;
-      }
-    }
-
-    // Remote participant video (first non-local)
-    const remoteParticipant = Object.values(participants).find(
-      (p: DailyParticipant) => !p.local
-    ) as DailyParticipant | undefined;
-
-    if (remoteParticipant?.tracks?.video?.persistentTrack && replicaVideoRef.current) {
-      const stream = new MediaStream([remoteParticipant.tracks.video.persistentTrack]);
-      if (replicaVideoRef.current.srcObject !== stream) {
-        replicaVideoRef.current.srcObject = stream;
-      }
-    }
-
-    // Attach remote audio for playback
-    if (remoteParticipant?.tracks?.audio?.persistentTrack) {
-      if (!remoteAudioRef.current) {
-        remoteAudioRef.current = new Audio();
-        remoteAudioRef.current.autoplay = true;
-      }
-      const audioStream = new MediaStream([remoteParticipant.tracks.audio.persistentTrack]);
-      if (remoteAudioRef.current.srcObject !== audioStream) {
-        remoteAudioRef.current.srcObject = audioStream;
-        remoteAudioRef.current.play().catch(() => {});
-      }
-    }
-
-    // Try to start recording once tracks are available
-    tryStartRecording();
-  }, [tryStartRecording]);
-
   // Try to start recording — needs remote video + audio tracks to be ready
   const tryStartRecording = useCallback(() => {
     // Already recording
@@ -206,6 +161,51 @@ export default function StudentPage({
     recorderRef.current = recorder;
     console.log("[Recording] Started with", tracks.length, "tracks, mimeType:", mimeType);
   }, []);
+
+  // Attach video tracks when participants update
+  const attachTracks = useCallback(() => {
+    const callObject = callObjectRef.current;
+    if (!callObject) return;
+
+    const participants = callObject.participants();
+
+    // Local participant video
+    const local = participants.local;
+    if (local?.tracks?.video?.persistentTrack && selfVideoRef.current) {
+      const stream = new MediaStream([local.tracks.video.persistentTrack]);
+      if (selfVideoRef.current.srcObject !== stream) {
+        selfVideoRef.current.srcObject = stream;
+      }
+    }
+
+    // Remote participant video (first non-local)
+    const remoteParticipant = Object.values(participants).find(
+      (p: DailyParticipant) => !p.local
+    ) as DailyParticipant | undefined;
+
+    if (remoteParticipant?.tracks?.video?.persistentTrack && replicaVideoRef.current) {
+      const stream = new MediaStream([remoteParticipant.tracks.video.persistentTrack]);
+      if (replicaVideoRef.current.srcObject !== stream) {
+        replicaVideoRef.current.srcObject = stream;
+      }
+    }
+
+    // Attach remote audio for playback
+    if (remoteParticipant?.tracks?.audio?.persistentTrack) {
+      if (!remoteAudioRef.current) {
+        remoteAudioRef.current = new Audio();
+        remoteAudioRef.current.autoplay = true;
+      }
+      const audioStream = new MediaStream([remoteParticipant.tracks.audio.persistentTrack]);
+      if (remoteAudioRef.current.srcObject !== audioStream) {
+        remoteAudioRef.current.srcObject = audioStream;
+        remoteAudioRef.current.play().catch(() => {});
+      }
+    }
+
+    // Try to start recording once tracks are available
+    tryStartRecording();
+  }, [tryStartRecording]);
 
   useEffect(() => {
     api(`/api/assignments/${assignmentId}`)
