@@ -117,40 +117,42 @@ export default function StudentPage({
     setTimerInterval(interval);
   }, []);
 
-  // Try to start recording — needs remote video + audio tracks to be ready
+  // Try to start recording — needs remote VIDEO + remote AUDIO + local AUDIO
+  // before starting. This ensures the replica's voice is captured.
   const tryStartRecording = useCallback(() => {
-    // Already started (use flag instead of ref to prevent re-entrancy)
     if (recordingStartedRef.current) return;
 
     const callObject = callObjectRef.current;
     if (!callObject) return;
 
     const participants = callObject.participants();
-    const tracks: MediaStreamTrack[] = [];
 
-    // Collect remote participant's video and audio
-    for (const [id, p] of Object.entries(participants)) {
-      if (id === "local") continue;
-      const dp = p as DailyParticipant;
-      if (dp.tracks?.video?.persistentTrack) {
-        tracks.push(dp.tracks.video.persistentTrack);
-      }
-      if (dp.tracks?.audio?.persistentTrack) {
-        tracks.push(dp.tracks.audio.persistentTrack);
-      }
+    // Find the remote (replica) participant
+    const remote = Object.entries(participants).find(
+      ([id]) => id !== "local"
+    )?.[1] as DailyParticipant | undefined;
+
+    if (!remote) {
+      console.log("[Recording] tryStart: no remote participant yet");
+      return;
     }
 
-    // Also capture local audio (student's mic)
-    const local = participants.local;
-    if (local?.tracks?.audio?.persistentTrack) {
-      tracks.push(local.tracks.audio.persistentTrack);
+    const remoteVideo = remote.tracks?.video?.persistentTrack;
+    const remoteAudio = remote.tracks?.audio?.persistentTrack;
+    const localAudio = participants.local?.tracks?.audio?.persistentTrack;
+
+    // Require ALL THREE tracks before starting — otherwise we'd miss the
+    // replica's voice (which is the whole point of recording)
+    if (!remoteVideo || !remoteAudio || !localAudio) {
+      console.log("[Recording] tryStart: waiting for tracks", {
+        remoteVideo: !!remoteVideo,
+        remoteAudio: !!remoteAudio,
+        localAudio: !!localAudio,
+      });
+      return;
     }
 
-    // Need at least video + one audio track before starting
-    const hasVideo = tracks.some((t) => t.kind === "video");
-    const hasAudio = tracks.some((t) => t.kind === "audio");
-    if (!hasVideo || !hasAudio) return;
-
+    const tracks = [remoteVideo, remoteAudio, localAudio];
     const stream = new MediaStream(tracks);
     chunksRef.current = [];
 
@@ -167,12 +169,11 @@ export default function StudentPage({
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) {
         chunksRef.current.push(e.data);
-        console.log("[Recording] chunk", chunksRef.current.length, "size", e.data.size);
       }
     };
     recorder.start(1000);
     recorderRef.current = recorder;
-    console.log("[Recording] Started with", tracks.length, "tracks, mimeType:", mimeType);
+    console.log("[Recording] Started with 3 tracks (remote video+audio, local audio), mimeType:", mimeType);
   }, []);
 
   // Attach video tracks when participants update
