@@ -83,6 +83,7 @@ export default function StudentPage({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const recordingBlobRef = useRef<Blob | null>(null);
+  const recordingStartedRef = useRef(false);
   const durationRef = useRef(0);
 
   // Audio playback ref for remote participant
@@ -112,8 +113,8 @@ export default function StudentPage({
 
   // Try to start recording — needs remote video + audio tracks to be ready
   const tryStartRecording = useCallback(() => {
-    // Already recording
-    if (recorderRef.current) return;
+    // Already started (use flag instead of ref to prevent re-entrancy)
+    if (recordingStartedRef.current) return;
 
     const callObject = callObjectRef.current;
     if (!callObject) return;
@@ -153,9 +154,15 @@ export default function StudentPage({
         ? "video/webm"
         : "video/mp4";
 
+    // Set flag BEFORE creating recorder to prevent re-entrancy
+    recordingStartedRef.current = true;
+
     const recorder = new MediaRecorder(stream, { mimeType });
     recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data);
+      if (e.data.size > 0) {
+        chunksRef.current.push(e.data);
+        console.log("[Recording] chunk", chunksRef.current.length, "size", e.data.size);
+      }
     };
     recorder.start(1000);
     recorderRef.current = recorder;
@@ -275,14 +282,30 @@ export default function StudentPage({
 
     // Stop recorder and capture blob
     const recorder = recorderRef.current;
-    if (recorder && recorder.state !== "inactive") {
-      await new Promise<void>((resolve) => {
-        recorder.onstop = () => {
-          recordingBlobRef.current = new Blob(chunksRef.current, { type: recorder.mimeType });
-          resolve();
-        };
-        recorder.stop();
-      });
+    console.log("[Recording] endInterview: recorder state =", recorder?.state, "chunks =", chunksRef.current.length);
+    if (recorder) {
+      if (recorder.state !== "inactive") {
+        await new Promise<void>((resolve) => {
+          const timeout = setTimeout(() => {
+            console.log("[Recording] onstop timeout, forcing blob creation");
+            recordingBlobRef.current = new Blob(chunksRef.current, { type: recorder.mimeType });
+            resolve();
+          }, 3000);
+          recorder.onstop = () => {
+            clearTimeout(timeout);
+            recordingBlobRef.current = new Blob(chunksRef.current, { type: recorder.mimeType });
+            console.log("[Recording] Blob created, size =", recordingBlobRef.current?.size);
+            resolve();
+          };
+          recorder.stop();
+        });
+      } else {
+        // Recorder already inactive — create blob from accumulated chunks
+        recordingBlobRef.current = new Blob(chunksRef.current, { type: recorder.mimeType });
+        console.log("[Recording] Recorder inactive, blob size =", recordingBlobRef.current?.size);
+      }
+    } else {
+      console.log("[Recording] No recorder to stop");
     }
 
     durationRef.current = INTERVIEW_DURATION - elapsed;
@@ -308,6 +331,7 @@ export default function StudentPage({
     }
     chunksRef.current = [];
     recordingBlobRef.current = null;
+    recordingStartedRef.current = false;
 
     if (remoteAudioRef.current) {
       remoteAudioRef.current.pause();
@@ -351,7 +375,8 @@ export default function StudentPage({
 
       // Upload recording blob in background
       const blob = recordingBlobRef.current;
-      if (blob) {
+      console.log("[Recording] submit: blob =", blob ? `${blob.size} bytes, ${blob.type}` : "null");
+      if (blob && blob.size > 0) {
         setUploadingRecording(true);
         try {
           const formData = new FormData();
