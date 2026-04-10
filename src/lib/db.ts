@@ -8,7 +8,7 @@ export interface Assignment {
   title: string;
   description: string;
   context: string; // extracted PDF text
-  agentId: string; // legacy ElevenLabs agent ID or "livekit"
+  agentId: string; // "tavus" or legacy agent ID
   driveFolderId?: string; // Google Drive folder for recordings
   createdAt: string;
 }

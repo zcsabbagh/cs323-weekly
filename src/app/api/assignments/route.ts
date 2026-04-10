@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
     title,
     description: description || "",
     context,
-    agentId: "livekit",
+    agentId: "tavus",
     driveFolderId,
     createdAt: new Date().toISOString(),
   };

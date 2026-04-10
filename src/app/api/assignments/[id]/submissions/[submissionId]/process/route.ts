@@ -38,7 +38,7 @@ export async function POST(
   await saveSubmission(submission);
 
   try {
-    // Try to get transcript from file storage (LiveKit agent saves it there)
+    // Try to get transcript from file storage (Tavus webhook saves it here)
     let transcript: string | null = null;
     for (let i = 0; i < 30; i++) {
       transcript = await getTranscriptFromStorage(submission.conversationId);

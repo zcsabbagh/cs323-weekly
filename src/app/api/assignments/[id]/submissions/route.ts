@@ -95,7 +95,7 @@ export async function POST(
   const body = await req.json();
   const { sunnetId, roomName, conversationId, duration } = body;
 
-  // Support both roomName (LiveKit) and conversationId (legacy ElevenLabs)
+  // Support both roomName and conversationId
   const interviewId = roomName || conversationId;
 
   if (!sunnetId || !interviewId) {
