@@ -1,7 +1,4 @@
-import fs from "fs/promises";
-import path from "path";
-
-const DATA_DIR = process.env.DATA_DIR || path.join(process.cwd(), "data");
+import { supabase } from "./supabase";
 
 export interface Assignment {
   id: string;
@@ -35,105 +32,202 @@ export interface Submission {
   createdAt: string;
 }
 
-async function ensureDir(dir: string) {
-  await fs.mkdir(dir, { recursive: true });
+// ---------- Row mappers ----------
+
+interface AssignmentRow {
+  id: string;
+  title: string;
+  description: string | null;
+  context: string;
+  agent_id: string | null;
+  persona_id: string | null;
+  drive_folder_id: string | null;
+  created_at: string;
 }
 
-function assignmentsFile() {
-  return path.join(DATA_DIR, "assignments.json");
+function rowToAssignment(row: AssignmentRow): Assignment {
+  return {
+    id: row.id,
+    title: row.title,
+    description: row.description || "",
+    context: row.context,
+    agentId: row.agent_id || "tavus",
+    personaId: row.persona_id || undefined,
+    driveFolderId: row.drive_folder_id || undefined,
+    createdAt: row.created_at,
+  };
 }
 
-function submissionsFile(assignmentId: string) {
-  return path.join(DATA_DIR, "submissions", `${assignmentId}.json`);
+interface StudentRow {
+  id: string;
+  first_name: string;
+  last_name: string;
+  sunnet_id: string;
+  created_at: string;
 }
+
+function rowToStudent(row: StudentRow): Student {
+  return {
+    id: row.id,
+    firstName: row.first_name,
+    lastName: row.last_name,
+    sunnetId: row.sunnet_id,
+    createdAt: row.created_at,
+  };
+}
+
+interface SubmissionRow {
+  id: string;
+  assignment_id: string;
+  sunnet_id: string;
+  conversation_id: string;
+  transcript: string | null;
+  summary: string | null;
+  score: string;
+  duration: string | null;
+  status: string;
+  created_at: string;
+}
+
+function rowToSubmission(row: SubmissionRow): Submission {
+  return {
+    id: row.id,
+    assignmentId: row.assignment_id,
+    sunnetId: row.sunnet_id,
+    conversationId: row.conversation_id,
+    transcript: row.transcript || "",
+    summary: row.summary || "",
+    score: row.score as Submission["score"],
+    duration: row.duration || "0:00",
+    status: row.status as Submission["status"],
+    createdAt: row.created_at,
+  };
+}
+
+// ---------- Assignments ----------
 
 export async function getAssignments(): Promise<Assignment[]> {
-  await ensureDir(DATA_DIR);
-  try {
-    const data = await fs.readFile(assignmentsFile(), "utf-8");
-    return JSON.parse(data);
-  } catch {
-    return [];
-  }
+  const { data, error } = await supabase
+    .from("cs323_assignments")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data || []).map(rowToAssignment);
 }
 
 export async function getAssignment(id: string): Promise<Assignment | null> {
-  const assignments = await getAssignments();
-  return assignments.find((a) => a.id === id) || null;
+  const { data, error } = await supabase
+    .from("cs323_assignments")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? rowToAssignment(data) : null;
 }
 
-export async function saveAssignment(assignment: Assignment) {
-  await ensureDir(DATA_DIR);
-  const assignments = await getAssignments();
-  const idx = assignments.findIndex((a) => a.id === assignment.id);
-  if (idx >= 0) assignments[idx] = assignment;
-  else assignments.push(assignment);
-  await fs.writeFile(assignmentsFile(), JSON.stringify(assignments, null, 2));
+export async function saveAssignment(assignment: Assignment): Promise<void> {
+  const { error } = await supabase.from("cs323_assignments").upsert({
+    id: assignment.id,
+    title: assignment.title,
+    description: assignment.description,
+    context: assignment.context,
+    agent_id: assignment.agentId,
+    persona_id: assignment.personaId || null,
+    drive_folder_id: assignment.driveFolderId || null,
+    created_at: assignment.createdAt,
+  });
+  if (error) throw error;
 }
 
-function studentsFile() {
-  return path.join(DATA_DIR, "students.json");
+export async function deleteAssignment(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("cs323_assignments")
+    .delete()
+    .eq("id", id);
+  if (error) throw error;
 }
+
+// ---------- Students ----------
 
 export async function getStudents(): Promise<Student[]> {
-  await ensureDir(DATA_DIR);
-  try {
-    const data = await fs.readFile(studentsFile(), "utf-8");
-    return JSON.parse(data);
-  } catch {
-    return [];
-  }
+  const { data, error } = await supabase
+    .from("cs323_students")
+    .select("*")
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data || []).map(rowToStudent);
 }
 
-export async function saveStudent(student: Student) {
-  await ensureDir(DATA_DIR);
-  const students = await getStudents();
-  const idx = students.findIndex((s) => s.id === student.id);
-  if (idx >= 0) students[idx] = student;
-  else students.push(student);
-  await fs.writeFile(studentsFile(), JSON.stringify(students, null, 2));
+export async function saveStudent(student: Student): Promise<void> {
+  const { error } = await supabase.from("cs323_students").upsert({
+    id: student.id,
+    first_name: student.firstName,
+    last_name: student.lastName,
+    sunnet_id: student.sunnetId,
+    created_at: student.createdAt,
+  });
+  if (error) throw error;
 }
 
-export async function deleteStudent(id: string) {
-  await ensureDir(DATA_DIR);
-  const students = await getStudents();
-  const filtered = students.filter((s) => s.id !== id);
-  await fs.writeFile(studentsFile(), JSON.stringify(filtered, null, 2));
+export async function deleteStudent(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("cs323_students")
+    .delete()
+    .eq("id", id);
+  if (error) throw error;
 }
 
-export async function deleteAssignment(id: string) {
-  await ensureDir(DATA_DIR);
-  const assignments = await getAssignments();
-  const filtered = assignments.filter((a) => a.id !== id);
-  await fs.writeFile(assignmentsFile(), JSON.stringify(filtered, null, 2));
-}
+// ---------- Submissions ----------
 
 export async function getSubmissions(assignmentId: string): Promise<Submission[]> {
-  await ensureDir(path.join(DATA_DIR, "submissions"));
-  try {
-    const data = await fs.readFile(submissionsFile(assignmentId), "utf-8");
-    return JSON.parse(data);
-  } catch {
-    return [];
-  }
+  const { data, error } = await supabase
+    .from("cs323_submissions")
+    .select("*")
+    .eq("assignment_id", assignmentId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data || []).map(rowToSubmission);
 }
 
 export async function getSubmission(
   assignmentId: string,
   submissionId: string
 ): Promise<Submission | null> {
-  const submissions = await getSubmissions(assignmentId);
-  return submissions.find((s) => s.id === submissionId) || null;
+  const { data, error } = await supabase
+    .from("cs323_submissions")
+    .select("*")
+    .eq("assignment_id", assignmentId)
+    .eq("id", submissionId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? rowToSubmission(data) : null;
 }
 
-export async function saveSubmission(submission: Submission) {
-  await ensureDir(path.join(DATA_DIR, "submissions"));
-  const submissions = await getSubmissions(submission.assignmentId);
-  const idx = submissions.findIndex((s) => s.id === submission.id);
-  if (idx >= 0) submissions[idx] = submission;
-  else submissions.push(submission);
-  await fs.writeFile(
-    submissionsFile(submission.assignmentId),
-    JSON.stringify(submissions, null, 2)
-  );
+export async function saveSubmission(submission: Submission): Promise<void> {
+  const { error } = await supabase.from("cs323_submissions").upsert({
+    id: submission.id,
+    assignment_id: submission.assignmentId,
+    sunnet_id: submission.sunnetId,
+    conversation_id: submission.conversationId,
+    transcript: submission.transcript,
+    summary: submission.summary,
+    score: submission.score,
+    duration: submission.duration,
+    status: submission.status,
+    created_at: submission.createdAt,
+  });
+  if (error) throw error;
+}
+
+// Look up submission by conversation_id (Tavus) — used by webhook
+export async function getSubmissionByConversationId(
+  conversationId: string
+): Promise<Submission | null> {
+  const { data, error } = await supabase
+    .from("cs323_submissions")
+    .select("*")
+    .eq("conversation_id", conversationId)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? rowToSubmission(data) : null;
 }
