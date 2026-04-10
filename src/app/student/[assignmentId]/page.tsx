@@ -10,6 +10,8 @@ import type { Assignment } from "@/lib/db";
 import DailyIframe from "@daily-co/daily-js";
 import type { DailyCall, DailyParticipant } from "@daily-co/daily-js";
 import { createClient } from "@supabase/supabase-js";
+// @ts-expect-error - fix-webm-duration has no types
+import fixWebmDuration from "fix-webm-duration";
 
 const supabaseStorage = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -90,6 +92,7 @@ export default function StudentPage({
   const chunksRef = useRef<Blob[]>([]);
   const recordingBlobRef = useRef<Blob | null>(null);
   const recordingStartedRef = useRef(false);
+  const recordingStartMsRef = useRef(0);
   const durationRef = useRef(0);
 
   // Audio playback ref for remote participant
@@ -164,6 +167,7 @@ export default function StudentPage({
 
     // Set flag BEFORE creating recorder to prevent re-entrancy
     recordingStartedRef.current = true;
+    recordingStartMsRef.current = Date.now();
 
     const recorder = new MediaRecorder(stream, { mimeType });
     recorder.ondataavailable = (e) => {
@@ -290,25 +294,44 @@ export default function StudentPage({
     // Stop recorder and capture blob
     const recorder = recorderRef.current;
     console.log("[Recording] endInterview: recorder state =", recorder?.state, "chunks =", chunksRef.current.length);
+
+    const buildBlob = async (type: string): Promise<Blob> => {
+      const raw = new Blob(chunksRef.current, { type });
+      const durationMs = recordingStartMsRef.current
+        ? Date.now() - recordingStartMsRef.current
+        : 0;
+      // Patch missing duration metadata so Google Drive (and other players)
+      // can preview/seek the webm file properly
+      if (durationMs > 0 && type.includes("webm")) {
+        try {
+          const fixed = await fixWebmDuration(raw, durationMs);
+          console.log("[Recording] Fixed webm duration:", durationMs, "ms");
+          return fixed as Blob;
+        } catch (err) {
+          console.error("[Recording] fixWebmDuration failed:", err);
+        }
+      }
+      return raw;
+    };
+
     if (recorder) {
       if (recorder.state !== "inactive") {
         await new Promise<void>((resolve) => {
-          const timeout = setTimeout(() => {
+          const timeout = setTimeout(async () => {
             console.log("[Recording] onstop timeout, forcing blob creation");
-            recordingBlobRef.current = new Blob(chunksRef.current, { type: recorder.mimeType });
+            recordingBlobRef.current = await buildBlob(recorder.mimeType);
             resolve();
-          }, 3000);
-          recorder.onstop = () => {
+          }, 5000);
+          recorder.onstop = async () => {
             clearTimeout(timeout);
-            recordingBlobRef.current = new Blob(chunksRef.current, { type: recorder.mimeType });
+            recordingBlobRef.current = await buildBlob(recorder.mimeType);
             console.log("[Recording] Blob created, size =", recordingBlobRef.current?.size);
             resolve();
           };
           recorder.stop();
         });
       } else {
-        // Recorder already inactive — create blob from accumulated chunks
-        recordingBlobRef.current = new Blob(chunksRef.current, { type: recorder.mimeType });
+        recordingBlobRef.current = await buildBlob(recorder.mimeType);
         console.log("[Recording] Recorder inactive, blob size =", recordingBlobRef.current?.size);
       }
     } else {
@@ -339,6 +362,7 @@ export default function StudentPage({
     chunksRef.current = [];
     recordingBlobRef.current = null;
     recordingStartedRef.current = false;
+    recordingStartMsRef.current = 0;
 
     if (remoteAudioRef.current) {
       remoteAudioRef.current.pause();
