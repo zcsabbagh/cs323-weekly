@@ -7,40 +7,18 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Assignment } from "@/lib/db";
-import {
-  LiveKitRoom,
-  VideoTrack,
-  RoomAudioRenderer,
-  useTracks,
-  useRoomContext,
-  useConnectionState,
-} from "@livekit/components-react";
-import "@livekit/components-styles";
-import {
-  Track,
-  ConnectionState,
-  Room,
-  RoomEvent,
-  TranscriptionSegment,
-  Participant,
-} from "livekit-client";
+import DailyIframe from "@daily-co/daily-js";
+import type { DailyCall, DailyParticipant } from "@daily-co/daily-js";
 
 const INTERVIEW_DURATION = 300; // 5 minutes in seconds
 
 type Step = "loading" | "ready" | "connecting" | "interview" | "done" | "submitted";
-
-interface TranscriptEntry {
-  role: "agent" | "student";
-  text: string;
-  timestamp: number;
-}
 
 function usePermissions() {
   const [mic, setMic] = useState<"prompt" | "granted" | "denied">("prompt");
   const [cam, setCam] = useState<"prompt" | "granted" | "denied">("prompt");
 
   useEffect(() => {
-    // Check existing permissions
     navigator.permissions?.query({ name: "microphone" as PermissionName }).then((p) => {
       setMic(p.state as "prompt" | "granted" | "denied");
       p.onchange = () => setMic(p.state as "prompt" | "granted" | "denied");
@@ -83,23 +61,38 @@ export default function StudentPage({
   const [assignment, setAssignment] = useState<Assignment | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [step, setStep] = useState<Step>("loading");
-  const [roomName, setRoomName] = useState<string | null>(null);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [timerInterval, setTimerInterval] = useState<NodeJS.Timeout | null>(null);
   const [sunnetId, setSunnetId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submissionId, setSubmissionId] = useState<string | null>(null);
+  const [uploadingRecording, setUploadingRecording] = useState(false);
+  const [remoteJoined, setRemoteJoined] = useState(false);
 
   // Permissions
   const { mic, cam, requestMic, requestCam } = usePermissions();
   const permissionsGranted = mic === "granted" && cam === "granted";
 
-  // LiveKit connection state
-  const [livekitToken, setLivekitToken] = useState<string | null>(null);
-  const [livekitUrl, setLivekitUrl] = useState<string | null>(null);
-  const roomRef = useRef<Room | null>(null);
+  // Daily.js refs
+  const callObjectRef = useRef<DailyCall | null>(null);
+  const replicaVideoRef = useRef<HTMLVideoElement>(null);
+  const selfVideoRef = useRef<HTMLVideoElement>(null);
 
-  // Timer is started by InterviewRoom once avatar is ready
+  // Recording refs
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const recordingBlobRef = useRef<Blob | null>(null);
+  const durationRef = useRef(0);
+
+  function formatTime(secs: number) {
+    const m = Math.floor(secs / 60)
+      .toString()
+      .padStart(2, "0");
+    const s = (secs % 60).toString().padStart(2, "0");
+    return `${m}:${s}`;
+  }
+
   const startTimer = useCallback(() => {
     setElapsed(INTERVIEW_DURATION);
     const interval = setInterval(() => {
@@ -112,6 +105,65 @@ export default function StudentPage({
       });
     }, 1000);
     setTimerInterval(interval);
+  }, []);
+
+  // Attach video tracks when participants update
+  const attachTracks = useCallback(() => {
+    const callObject = callObjectRef.current;
+    if (!callObject) return;
+
+    const participants = callObject.participants();
+
+    // Local participant video
+    const local = participants.local;
+    if (local?.tracks?.video?.persistentTrack && selfVideoRef.current) {
+      const stream = new MediaStream([local.tracks.video.persistentTrack]);
+      if (selfVideoRef.current.srcObject !== stream) {
+        selfVideoRef.current.srcObject = stream;
+      }
+    }
+
+    // Remote participant video (first non-local)
+    const remoteParticipant = Object.values(participants).find(
+      (p: DailyParticipant) => !p.local
+    ) as DailyParticipant | undefined;
+
+    if (remoteParticipant?.tracks?.video?.persistentTrack && replicaVideoRef.current) {
+      const stream = new MediaStream([remoteParticipant.tracks.video.persistentTrack]);
+      if (replicaVideoRef.current.srcObject !== stream) {
+        replicaVideoRef.current.srcObject = stream;
+      }
+    }
+  }, []);
+
+  const startRecording = useCallback(() => {
+    const callObject = callObjectRef.current;
+    if (!callObject) return;
+
+    const participants = callObject.participants();
+    const audioTracks: MediaStreamTrack[] = [];
+
+    for (const p of Object.values(participants) as DailyParticipant[]) {
+      if (p.tracks?.audio?.persistentTrack) {
+        audioTracks.push(p.tracks.audio.persistentTrack);
+      }
+    }
+
+    if (audioTracks.length === 0) return;
+
+    const stream = new MediaStream(audioTracks);
+    chunksRef.current = [];
+
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus"
+      : "audio/webm";
+
+    const recorder = new MediaRecorder(stream, { mimeType });
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunksRef.current.push(e.data);
+    };
+    recorder.start(1000);
+    recorderRef.current = recorder;
   }, []);
 
   useEffect(() => {
@@ -130,68 +182,159 @@ export default function StudentPage({
   const startInterview = useCallback(async () => {
     try {
       setStep("connecting");
-      const res = await api(`/api/assignments/${assignmentId}/token`, {
+      const res = await api(`/api/assignments/${assignmentId}/conversation`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
       });
-      const { token, roomName: rn, url } = await res.json();
-      setLivekitToken(token);
-      setLivekitUrl(url);
-      setRoomName(rn);
+      const { conversationId: cid, conversationUrl, conversationName } = await res.json();
+      setConversationId(cid);
+
+      const callObject = DailyIframe.createCallObject({
+        videoSource: true,
+        audioSource: true,
+      });
+      callObjectRef.current = callObject;
+
+      callObject.on("joined-meeting", () => {
+        setStep("interview");
+        attachTracks();
+      });
+
+      callObject.on("participant-joined", (event) => {
+        if (!event) return;
+        attachTracks();
+
+        // When remote participant joins, start recording and timer
+        if (!event.participant.local) {
+          setRemoteJoined(true);
+          startRecording();
+          startTimer();
+          // Also attach audio for playback
+          const audioTrack = event.participant.tracks?.audio?.persistentTrack;
+          if (audioTrack) {
+            const audioEl = new Audio();
+            audioEl.srcObject = new MediaStream([audioTrack]);
+            audioEl.play().catch(() => {});
+          }
+        }
+      });
+
+      callObject.on("participant-updated", () => {
+        attachTracks();
+      });
+
+      callObject.on("left-meeting", () => {
+        if (timerInterval) clearInterval(timerInterval);
+      });
+
+      await callObject.join({ url: conversationUrl });
+
+      void conversationName; // used for tracking if needed
     } catch (err) {
       console.error("Failed to start interview:", err);
       setStep("ready");
     }
-  }, [assignmentId]);
-
-  const onRoomConnected = useCallback(() => {
-    // Don't start timer here — wait for avatar video
-    setStep("interview");
-  }, []);
+  }, [assignmentId, attachTracks, startRecording, startTimer, timerInterval]);
 
   const endInterview = useCallback(async () => {
     if (timerInterval) clearInterval(timerInterval);
-    if (roomRef.current) {
-      roomRef.current.disconnect();
+
+    // Stop recorder and capture blob
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      await new Promise<void>((resolve) => {
+        recorder.onstop = () => {
+          recordingBlobRef.current = new Blob(chunksRef.current, { type: recorder.mimeType });
+          resolve();
+        };
+        recorder.stop();
+      });
     }
+
+    durationRef.current = INTERVIEW_DURATION - elapsed;
+
+    const callObject = callObjectRef.current;
+    if (callObject) {
+      await callObject.leave();
+      callObject.destroy();
+      callObjectRef.current = null;
+    }
+
     setStep("done");
+  }, [timerInterval, elapsed]);
+
+  const restart = useCallback(async () => {
+    if (timerInterval) clearInterval(timerInterval);
+
+    // Stop recorder if still running
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      recorder.stop();
+      recorderRef.current = null;
+    }
+    chunksRef.current = [];
+    recordingBlobRef.current = null;
+
+    const callObject = callObjectRef.current;
+    if (callObject) {
+      await callObject.leave();
+      callObject.destroy();
+      callObjectRef.current = null;
+    }
+
+    setStep("ready");
+    setConversationId(null);
+    setElapsed(0);
+    setRemoteJoined(false);
   }, [timerInterval]);
 
   const submitInterview = useCallback(async () => {
-    if (!roomName || !sunnetId.trim()) return;
+    if (!conversationId || !sunnetId.trim()) return;
     setSubmitting(true);
-    const res = await api(`/api/assignments/${assignmentId}/submissions`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        sunnetId,
-        roomName,
-        duration: formatTime(INTERVIEW_DURATION - elapsed),
-      }),
-    });
-    const data = await res.json();
-    setSubmissionId(data.id);
-    setSubmitting(false);
-    setStep("submitted");
-  }, [assignmentId, sunnetId, roomName, elapsed]);
 
-  const restart = useCallback(() => {
-    if (timerInterval) clearInterval(timerInterval);
-    setStep("ready");
-    setRoomName(null);
-    setLivekitToken(null);
-    setLivekitUrl(null);
-    setElapsed(0);
-  }, [timerInterval]);
+    try {
+      const res = await api(`/api/assignments/${assignmentId}/submissions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sunnetId,
+          roomName: conversationId,
+          conversationId,
+          duration: formatTime(durationRef.current || INTERVIEW_DURATION - elapsed),
+        }),
+      });
+      const data = await res.json();
+      const sid = data.id;
+      setSubmissionId(sid);
+      setSubmitting(false);
+      setStep("submitted");
 
-  function formatTime(secs: number) {
-    const m = Math.floor(secs / 60)
-      .toString()
-      .padStart(2, "0");
-    const s = (secs % 60).toString().padStart(2, "0");
-    return `${m}:${s}`;
-  }
+      // Upload recording blob in background
+      const blob = recordingBlobRef.current;
+      if (blob) {
+        setUploadingRecording(true);
+        try {
+          const formData = new FormData();
+          formData.append("recording", blob, "recording.webm");
+          formData.append("assignmentId", assignmentId);
+          formData.append("submissionId", sid);
+          formData.append("sunnetId", sunnetId);
+          await api(`/api/recordings/upload`, {
+            method: "POST",
+            body: formData,
+          });
+        } catch (err) {
+          console.error("Failed to upload recording:", err);
+        } finally {
+          setUploadingRecording(false);
+        }
+      }
+    } catch (err) {
+      console.error("Failed to submit:", err);
+      setSubmitting(false);
+    }
+  }, [assignmentId, sunnetId, conversationId, elapsed]);
 
   if (notFound) {
     return (
@@ -299,41 +442,88 @@ export default function StudentPage({
           )}
 
           {/* Connecting */}
-          {step === "connecting" && !livekitToken && (
-            <div className="space-y-8 text-center">
-              <p className="text-lg text-muted-foreground">Connecting...</p>
+          {step === "connecting" && (
+            <div className="space-y-4 text-center py-8">
+              <div className="w-8 h-8 border-2 border-muted-foreground/30 border-t-foreground rounded-full animate-spin mx-auto" />
+              <p className="text-muted-foreground">Connecting...</p>
             </div>
           )}
 
-          {/* Interview (LiveKit Room) */}
-          {(step === "connecting" || step === "interview") &&
-            livekitToken &&
-            livekitUrl && (
-              <LiveKitRoom
-                token={livekitToken}
-                serverUrl={livekitUrl}
-                connect={true}
-                video={true}
-                audio={true}
-                onConnected={onRoomConnected}
-                onDisconnected={() => {
-                  if (step === "interview") {
-                    if (timerInterval) clearInterval(timerInterval);
-                    setStep("done");
-                  }
-                }}
-              >
-                <RoomAudioRenderer />
-                <InterviewRoom
-                  elapsed={elapsed}
-                  formatTime={formatTime}
-                  onRestart={restart}
-                  onEnd={endInterview}
-                  roomRef={roomRef}
-                  onAvatarReady={startTimer}
-                />
-              </LiveKitRoom>
-            )}
+          {/* Interview */}
+          {step === "interview" && (
+            <div className="space-y-6">
+              {/* Timer */}
+              <div className="text-center">
+                <p className="text-6xl font-mono font-light tabular-nums tracking-wider">
+                  {remoteJoined ? formatTime(elapsed) : "--:--"}
+                </p>
+                {!remoteJoined && (
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Waiting for avatar to join...
+                  </p>
+                )}
+              </div>
+
+              {/* Video grid */}
+              <div className="grid grid-cols-2 gap-3">
+                {/* Avatar video */}
+                <div className="aspect-[4/3] rounded-xl overflow-hidden bg-muted/20 flex items-center justify-center relative">
+                  {!remoteJoined && (
+                    <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                      <div className="w-10 h-10 border-2 border-muted-foreground/30 border-t-foreground rounded-full animate-spin" />
+                      <p className="text-xs">Loading avatar...</p>
+                    </div>
+                  )}
+                  <video
+                    ref={replicaVideoRef}
+                    autoPlay
+                    playsInline
+                    className={`w-full h-full object-cover ${remoteJoined ? "block" : "hidden"}`}
+                  />
+                  <span className="absolute bottom-2 left-2 text-[10px] uppercase tracking-wider bg-black/60 text-white/70 px-2 py-0.5 rounded">
+                    TA
+                  </span>
+                </div>
+
+                {/* Self video */}
+                <div className="aspect-[4/3] rounded-xl overflow-hidden bg-muted/20 flex items-center justify-center relative">
+                  <video
+                    ref={selfVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="w-full h-full object-cover"
+                    style={{ transform: "scaleX(-1)" }}
+                  />
+                  <span className="absolute bottom-2 left-2 text-[10px] uppercase tracking-wider bg-black/60 text-white/70 px-2 py-0.5 rounded">
+                    You
+                  </span>
+                </div>
+              </div>
+
+              {/* Controls */}
+              <div className="flex gap-3">
+                <Button
+                  onClick={restart}
+                  variant="outline"
+                  className="flex-1 h-14 text-base rounded-xl hover:scale-[1.01] active:scale-[0.96]"
+                  style={{
+                    transitionProperty: "transform, background-color, border-color",
+                  }}
+                >
+                  Re-record
+                </Button>
+                <Button
+                  onClick={endInterview}
+                  variant="destructive"
+                  className="flex-1 h-14 text-base rounded-xl hover:scale-[1.01] active:scale-[0.96]"
+                  style={{ transitionProperty: "transform, background-color" }}
+                >
+                  End Early
+                </Button>
+              </div>
+            </div>
+          )}
 
           {/* Done */}
           {step === "done" && (
@@ -341,7 +531,7 @@ export default function StudentPage({
               <div className="text-center space-y-1">
                 <p className="text-2xl font-medium">Interview Complete</p>
                 <p className="text-base text-muted-foreground">
-                  Duration: {formatTime(INTERVIEW_DURATION - elapsed)}
+                  Duration: {formatTime(durationRef.current || INTERVIEW_DURATION - elapsed)}
                 </p>
               </div>
 
@@ -410,6 +600,9 @@ export default function StudentPage({
               >
                 Your interview has been recorded and will be processed shortly.
               </p>
+              {uploadingRecording && (
+                <p className="text-sm text-muted-foreground">Uploading recording...</p>
+              )}
               {submissionId && (
                 <div className="pt-3 space-y-1">
                   <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
@@ -447,279 +640,6 @@ export default function StudentPage({
             </div>
           )}
         </div>
-      </div>
-    </div>
-  );
-}
-
-/** Inner component that renders inside LiveKitRoom context */
-function InterviewRoom({
-  elapsed,
-  formatTime,
-  onRestart,
-  onEnd,
-  roomRef,
-  onAvatarReady,
-}: {
-  elapsed: number;
-  formatTime: (secs: number) => string;
-  onRestart: () => void;
-  onEnd: () => void;
-  roomRef: React.RefObject<Room | null>;
-  onAvatarReady: () => void;
-}) {
-  const room = useRoomContext();
-  const connectionState = useConnectionState();
-  const videoTracks = useTracks(
-    [Track.Source.Camera],
-    { onlySubscribed: false }
-  );
-
-  const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
-  const [timerStarted, setTimerStarted] = useState(false);
-  const transcriptEndRef = useRef<HTMLDivElement>(null);
-
-  // Store room reference for parent to disconnect
-  useEffect(() => {
-    roomRef.current = room;
-  }, [room, roomRef]);
-
-  // Log connection state changes
-  useEffect(() => {
-    console.log(`[Interview] connectionState=${connectionState} ts=${Date.now()}`);
-  }, [connectionState]);
-
-  // Log video track changes
-  useEffect(() => {
-    const tracks = videoTracks.map((t) => ({
-      participant: t.participant.identity,
-      isLocal: t.participant.isLocal,
-      hasTrack: !!t.publication?.track,
-      source: t.source,
-    }));
-    console.log(`[Interview] videoTracks updated (${videoTracks.length}):`, tracks, `ts=${Date.now()}`);
-  }, [videoTracks]);
-
-  // Log room events — participants joining/leaving and track subscriptions
-  useEffect(() => {
-    if (!room) return;
-    const joinedAt = Date.now();
-
-    const onParticipantConnected = (p: Participant) => {
-      console.log(`[Interview] participant connected: identity=${p.identity} elapsed=${Date.now() - joinedAt}ms`);
-    };
-    const onParticipantDisconnected = (p: Participant) => {
-      console.log(`[Interview] participant disconnected: identity=${p.identity} elapsed=${Date.now() - joinedAt}ms`);
-    };
-    const onTrackSubscribed = (track: unknown, _pub: unknown, participant: Participant) => {
-      const t = track as { kind: string };
-      console.log(`[Interview] track subscribed: kind=${t.kind} participant=${participant.identity} elapsed=${Date.now() - joinedAt}ms`);
-    };
-    const onTrackUnsubscribed = (track: unknown, _pub: unknown, participant: Participant) => {
-      const t = track as { kind: string };
-      console.log(`[Interview] track unsubscribed: kind=${t.kind} participant=${participant.identity}`);
-    };
-
-    room.on(RoomEvent.ParticipantConnected, onParticipantConnected);
-    room.on(RoomEvent.ParticipantDisconnected, onParticipantDisconnected);
-    room.on(RoomEvent.TrackSubscribed, onTrackSubscribed);
-    room.on(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed);
-
-    // Log existing participants immediately
-    const existing = Array.from(room.remoteParticipants.values());
-    console.log(`[Interview] room connected, existing remote participants (${existing.length}):`,
-      existing.map((p) => ({ identity: p.identity, trackCount: p.trackPublications.size }))
-    );
-
-    return () => {
-      room.off(RoomEvent.ParticipantConnected, onParticipantConnected);
-      room.off(RoomEvent.ParticipantDisconnected, onParticipantDisconnected);
-      room.off(RoomEvent.TrackSubscribed, onTrackSubscribed);
-      room.off(RoomEvent.TrackUnsubscribed, onTrackUnsubscribed);
-    };
-  }, [room]);
-
-  // Listen for transcription events
-  useEffect(() => {
-    if (!room) return;
-
-    const handleTranscription = (
-      segments: TranscriptionSegment[],
-      participant?: Participant,
-    ) => {
-      for (const seg of segments) {
-        if (!seg.text.trim()) continue;
-        const isAgent = !participant?.isLocal;
-        setTranscript((prev) => {
-          // Update existing segment if it's a partial (same id)
-          const existing = prev.findIndex(
-            (e) => (e as TranscriptEntry & { id?: string }).id === seg.id
-          );
-          const entry = {
-            role: (isAgent ? "agent" : "student") as "agent" | "student",
-            text: seg.text,
-            timestamp: Date.now(),
-            id: seg.id,
-          };
-          if (existing >= 0) {
-            const updated = [...prev];
-            updated[existing] = entry;
-            return updated;
-          }
-          return [...prev, entry];
-        });
-      }
-    };
-
-    room.on(RoomEvent.TranscriptionReceived, handleTranscription);
-    return () => {
-      room.off(RoomEvent.TranscriptionReceived, handleTranscription);
-    };
-  }, [room]);
-
-  // Auto-scroll transcript
-  useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [transcript]);
-
-  // Find avatar video (remote participant with camera track)
-  const avatarTrack = videoTracks.find(
-    (t) => !t.participant.isLocal && t.publication?.track
-  );
-
-  // Find self video (local participant camera)
-  const selfTrack = videoTracks.find(
-    (t) => t.participant.isLocal && t.publication?.track
-  );
-
-  // Start timer when avatar video first appears
-  useEffect(() => {
-    if (avatarTrack?.publication?.track && !timerStarted) {
-      console.log(`[Interview] avatarTrack ready — starting timer. participant=${avatarTrack.participant.identity}`);
-      setTimerStarted(true);
-      onAvatarReady();
-    } else if (!avatarTrack?.publication?.track) {
-      console.log(`[Interview] avatarTrack not ready: avatarTrack=${!!avatarTrack} track=${!!avatarTrack?.publication?.track}`);
-    }
-  }, [avatarTrack, timerStarted, onAvatarReady]);
-
-  if (connectionState !== ConnectionState.Connected) {
-    return (
-      <div className="space-y-4 text-center py-8">
-        <div className="w-8 h-8 border-2 border-muted-foreground/30 border-t-foreground rounded-full animate-spin mx-auto" />
-        <p className="text-muted-foreground">Connecting to room...</p>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Timer */}
-      <div className="text-center">
-        <p className="text-6xl font-mono font-light tabular-nums tracking-wider">
-          {timerStarted ? formatTime(elapsed) : "--:--"}
-        </p>
-        {!timerStarted && (
-          <p className="text-sm text-muted-foreground mt-1">
-            Waiting for avatar to join...
-          </p>
-        )}
-      </div>
-
-      {/* Video grid — equal sized */}
-      <div className="grid grid-cols-2 gap-3">
-        {/* Avatar video */}
-        <div className="aspect-[4/3] rounded-xl overflow-hidden bg-muted/20 flex items-center justify-center relative">
-          {avatarTrack?.publication?.track ? (
-            <VideoTrack
-              trackRef={avatarTrack}
-              style={{ width: "100%", height: "100%", objectFit: "cover" }}
-            />
-          ) : (
-            <div className="flex flex-col items-center gap-2 text-muted-foreground">
-              <div className="w-10 h-10 border-2 border-muted-foreground/30 border-t-foreground rounded-full animate-spin" />
-              <p className="text-xs">Loading avatar...</p>
-            </div>
-          )}
-          <span className="absolute bottom-2 left-2 text-[10px] uppercase tracking-wider bg-black/60 text-white/70 px-2 py-0.5 rounded">
-            TA
-          </span>
-        </div>
-
-        {/* Self video */}
-        <div className="aspect-[4/3] rounded-xl overflow-hidden bg-muted/20 flex items-center justify-center relative">
-          {selfTrack?.publication?.track ? (
-            <VideoTrack
-              trackRef={selfTrack}
-              style={{ width: "100%", height: "100%", objectFit: "cover", transform: "scaleX(-1)" }}
-            />
-          ) : (
-            <div className="flex flex-col items-center gap-1 text-muted-foreground">
-              <svg
-                className="w-8 h-8"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={1.5}
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0"
-                />
-              </svg>
-              <p className="text-xs">You</p>
-            </div>
-          )}
-          <span className="absolute bottom-2 left-2 text-[10px] uppercase tracking-wider bg-black/60 text-white/70 px-2 py-0.5 rounded">
-            You
-          </span>
-        </div>
-      </div>
-
-      {/* Live transcript */}
-      {transcript.length > 0 && (
-        <div className="rounded-xl bg-muted/20 border border-border/30 p-4 max-h-40 overflow-y-auto">
-          <div className="space-y-2">
-            {transcript.map((entry, i) => (
-              <div key={i} className="flex gap-2 text-sm">
-                <span
-                  className={`font-medium shrink-0 ${
-                    entry.role === "agent"
-                      ? "text-blue-400"
-                      : "text-green-400"
-                  }`}
-                >
-                  {entry.role === "agent" ? "TA:" : "You:"}
-                </span>
-                <span className="text-muted-foreground">{entry.text}</span>
-              </div>
-            ))}
-            <div ref={transcriptEndRef} />
-          </div>
-        </div>
-      )}
-
-      {/* Controls */}
-      <div className="flex gap-3">
-        <Button
-          onClick={onRestart}
-          variant="outline"
-          className="flex-1 h-14 text-base rounded-xl hover:scale-[1.01] active:scale-[0.96]"
-          style={{
-            transitionProperty: "transform, background-color, border-color",
-          }}
-        >
-          Re-record
-        </Button>
-        <Button
-          onClick={onEnd}
-          variant="destructive"
-          className="flex-1 h-14 text-base rounded-xl hover:scale-[1.01] active:scale-[0.96]"
-          style={{ transitionProperty: "transform, background-color" }}
-        >
-          End Early
-        </Button>
       </div>
     </div>
   );
