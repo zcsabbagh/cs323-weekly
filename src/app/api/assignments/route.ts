@@ -54,14 +54,16 @@ export async function POST(req: NextRequest) {
   // Create a Tavus persona with the reading context baked in
   let personaId: string | undefined;
   try {
+    console.log("[Assignment] Creating Tavus persona for:", title);
     const persona = await createPersona({
       name: `CS323 - ${title}`,
       systemPrompt: buildSystemPrompt(context, description || ""),
       replicaId: TAVUS_REPLICA_ID,
     });
     personaId = persona.persona_id;
+    console.log("[Assignment] Created persona:", personaId);
   } catch (err) {
-    console.error("Failed to create Tavus persona:", err);
+    console.error("[Assignment] Failed to create Tavus persona:", err);
   }
 
   const assignment = {
