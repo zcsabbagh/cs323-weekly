@@ -9,6 +9,42 @@ export interface TavusConversation {
   created_at: string;
 }
 
+export async function createPersona(opts: {
+  name: string;
+  systemPrompt: string;
+  replicaId: string;
+}): Promise<{ persona_id: string; persona_name: string }> {
+  const res = await fetch(`${TAVUS_BASE_URL}/personas`, {
+    method: "POST",
+    headers: {
+      "x-api-key": TAVUS_API_KEY,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      persona_name: opts.name,
+      system_prompt: opts.systemPrompt,
+      pipeline_mode: "full",
+      default_replica_id: opts.replicaId,
+      layers: {
+        llm: {
+          model: "tavus-gpt-oss",
+        },
+        tts: {
+          tts_engine: "cartesia",
+          tts_emotion_control: true,
+        },
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Tavus createPersona failed (${res.status}): ${text}`);
+  }
+
+  return res.json();
+}
+
 export async function createConversation(opts: {
   personaId: string;
   replicaId: string;

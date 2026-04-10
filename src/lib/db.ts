@@ -9,6 +9,7 @@ export interface Assignment {
   description: string;
   context: string; // extracted PDF text
   agentId: string; // "tavus" or legacy agent ID
+  personaId?: string; // Tavus persona ID (per-assignment)
   driveFolderId?: string; // Google Drive folder for recordings
   createdAt: string;
 }
