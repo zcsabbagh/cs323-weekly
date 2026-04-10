@@ -9,6 +9,12 @@ import { Label } from "@/components/ui/label";
 import type { Assignment } from "@/lib/db";
 import DailyIframe from "@daily-co/daily-js";
 import type { DailyCall, DailyParticipant } from "@daily-co/daily-js";
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseStorage = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 const INTERVIEW_DURATION = 300; // 5 minutes in seconds
 
@@ -373,22 +379,38 @@ export default function StudentPage({
       setSubmitting(false);
       setStep("submitted");
 
-      // Upload recording blob in background
+      // Upload recording blob in background — upload to Supabase Storage directly
+      // (bypasses Vercel's 4.5MB body limit), then notify server to transfer to Drive
       const blob = recordingBlobRef.current;
       console.log("[Recording] submit: blob =", blob ? `${blob.size} bytes, ${blob.type}` : "null");
       if (blob && blob.size > 0) {
         setUploadingRecording(true);
         try {
-          const formData = new FormData();
           const ext = blob.type.includes("mp4") ? "mp4" : "webm";
-          formData.append("recording", blob, `recording.${ext}`);
-          formData.append("assignmentId", assignmentId);
-          formData.append("submissionId", sid);
-          formData.append("sunnetId", sunnetId);
-          await api(`/api/recordings/upload`, {
+          const path = `${assignmentId}/${sid}.${ext}`;
+          console.log("[Recording] uploading to Supabase Storage:", path);
+          const { error: uploadError } = await supabaseStorage.storage
+            .from("cs323-recordings")
+            .upload(path, blob, {
+              contentType: blob.type,
+              upsert: true,
+            });
+          if (uploadError) throw uploadError;
+          console.log("[Recording] Supabase upload complete");
+
+          // Now tell the server to transfer to Google Drive
+          await api(`/api/recordings/transfer`, {
             method: "POST",
-            body: formData,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              storagePath: path,
+              assignmentId,
+              submissionId: sid,
+              sunnetId,
+              mimeType: blob.type,
+            }),
           });
+          console.log("[Recording] Transfer request sent");
         } catch (err) {
           console.error("Failed to upload recording:", err);
         } finally {
