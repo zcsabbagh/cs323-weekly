@@ -10,7 +10,6 @@ import type { Assignment } from "@/lib/db";
 import DailyIframe from "@daily-co/daily-js";
 import type { DailyCall, DailyParticipant } from "@daily-co/daily-js";
 import { createClient } from "@supabase/supabase-js";
-// @ts-expect-error - fix-webm-duration has no types
 import fixWebmDuration from "fix-webm-duration";
 
 const supabaseStorage = createClient(
