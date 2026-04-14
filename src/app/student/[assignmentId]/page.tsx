@@ -251,13 +251,27 @@ export default function StudentPage({
     // often leaves uploads stuck on "still being processed." Chrome 126+
     // and Safari produce playable fragmented MP4 from MediaRecorder;
     // Firefox falls back to WebM (and the fix-webm-duration patch).
-    const mimeType = MediaRecorder.isTypeSupported("video/mp4;codecs=avc1,mp4a")
-      ? "video/mp4;codecs=avc1,mp4a"
-      : MediaRecorder.isTypeSupported("video/mp4")
-        ? "video/mp4"
-        : MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
-          ? "video/webm;codecs=vp8,opus"
-          : "video/webm";
+    //
+    // Codec strings are picky: Chromium's isTypeSupported can return
+    // false for the generic "avc1,mp4a" but true for a fully-qualified
+    // profile like "avc1.42E01E,mp4a.40.2" (Baseline H.264 + AAC-LC).
+    // Try specific variants first, generic last.
+    const candidates = [
+      "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+      "video/mp4;codecs=avc1.64001E,mp4a.40.2",
+      "video/mp4;codecs=h264,aac",
+      "video/mp4;codecs=avc1,mp4a",
+      "video/mp4",
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm",
+    ];
+    const support = candidates.map((m) => ({
+      m,
+      ok: MediaRecorder.isTypeSupported(m),
+    }));
+    const mimeType = support.find((s) => s.ok)?.m || "video/webm";
+    console.log("[Recording] mimeType support matrix:", support);
 
     recordingStartedRef.current = true;
     recordingStartMsRef.current = Date.now();
