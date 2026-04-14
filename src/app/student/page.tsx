@@ -5,6 +5,18 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import type { Assignment } from "@/lib/db";
 
+// Parse YYYY-MM-DD as local time so it renders the calendar day
+// stored in the DB (not UTC-midnight shifted to the prior day).
+function formatDueDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 export default function StudentLanding() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,11 +57,7 @@ export default function StudentLanding() {
               >
                 <p className="text-sm font-medium">{a.title}</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {new Date(a.createdAt).toLocaleDateString("en-US", {
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric",
-                  })}
+                  {a.dueDate ? `Due ${formatDueDate(a.dueDate)}` : "No due date"}
                 </p>
               </Link>
             ))}
