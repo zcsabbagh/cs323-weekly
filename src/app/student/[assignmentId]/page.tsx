@@ -93,6 +93,10 @@ export default function StudentPage({
   const recordingStartedRef = useRef(false);
   const recordingStartMsRef = useRef(0);
   const durationRef = useRef(0);
+  // Composite pipeline cleanup — canvas draw loop, AudioContext, hidden
+  // <video> elements for the two source streams. Stored as a single
+  // teardown closure so endInterview/restart don't need to know the details.
+  const recordingCleanupRef = useRef<(() => void) | null>(null);
 
   // Audio playback ref for remote participant
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -119,8 +123,11 @@ export default function StudentPage({
     setTimerInterval(interval);
   }, []);
 
-  // Try to start recording — needs remote VIDEO + remote AUDIO + local AUDIO
-  // before starting. This ensures the replica's voice is captured.
+  // Try to start recording — needs ALL FOUR tracks (remote video+audio,
+  // local video+audio) before starting. Composites the two videos
+  // side-by-side via a hidden canvas and mixes the two audio streams
+  // through an AudioContext, so the final recording shows both faces
+  // with synchronized audio.
   const tryStartRecording = useCallback(() => {
     if (recordingStartedRef.current) return;
 
@@ -129,7 +136,6 @@ export default function StudentPage({
 
     const participants = callObject.participants();
 
-    // Find the remote (replica) participant
     const remote = Object.entries(participants).find(
       ([id]) => id !== "local"
     )?.[1] as DailyParticipant | undefined;
@@ -141,21 +147,103 @@ export default function StudentPage({
 
     const remoteVideo = remote.tracks?.video?.persistentTrack;
     const remoteAudio = remote.tracks?.audio?.persistentTrack;
+    const localVideo = participants.local?.tracks?.video?.persistentTrack;
     const localAudio = participants.local?.tracks?.audio?.persistentTrack;
 
-    // Require ALL THREE tracks before starting — otherwise we'd miss the
-    // replica's voice (which is the whole point of recording)
-    if (!remoteVideo || !remoteAudio || !localAudio) {
+    if (!remoteVideo || !remoteAudio || !localVideo || !localAudio) {
       console.log("[Recording] tryStart: waiting for tracks", {
         remoteVideo: !!remoteVideo,
         remoteAudio: !!remoteAudio,
+        localVideo: !!localVideo,
         localAudio: !!localAudio,
       });
       return;
     }
 
-    const tracks = [remoteVideo, remoteAudio, localAudio];
-    const stream = new MediaStream(tracks);
+    // Canvas: two 640x480 (4:3) tiles side by side to match the UI grid.
+    const TILE_W = 640;
+    const TILE_H = 480;
+    const CANVAS_W = TILE_W * 2;
+    const CANVAS_H = TILE_H;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = CANVAS_W;
+    canvas.height = CANVAS_H;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      console.error("[Recording] Failed to get 2d context");
+      return;
+    }
+
+    // Hidden <video> elements drive the canvas draw — detached from the
+    // DOM but muted so they don't produce audio (remoteAudioRef handles
+    // playback; mixing happens separately below).
+    const makeHiddenVideo = (track: MediaStreamTrack) => {
+      const el = document.createElement("video");
+      el.srcObject = new MediaStream([track]);
+      el.muted = true;
+      el.playsInline = true;
+      el.autoplay = true;
+      el.play().catch(() => {});
+      return el;
+    };
+    const leftVideo = makeHiddenVideo(remoteVideo);
+    const rightVideo = makeHiddenVideo(localVideo);
+
+    // Aspect-preserving "cover" fit — crops to fill the tile without stretching.
+    const drawCover = (
+      v: HTMLVideoElement,
+      dx: number,
+      dy: number,
+      dw: number,
+      dh: number
+    ) => {
+      const vw = v.videoWidth;
+      const vh = v.videoHeight;
+      if (!vw || !vh) return;
+      const scale = Math.max(dw / vw, dh / vh);
+      const sw = dw / scale;
+      const sh = dh / scale;
+      const sx = (vw - sw) / 2;
+      const sy = (vh - sh) / 2;
+      ctx.drawImage(v, sx, sy, sw, sh, dx, dy, dw, dh);
+    };
+
+    let rafId = 0;
+    let stopped = false;
+    const draw = () => {
+      if (stopped) return;
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
+      drawCover(leftVideo, 0, 0, TILE_W, TILE_H);
+      drawCover(rightVideo, TILE_W, 0, TILE_W, TILE_H);
+      rafId = requestAnimationFrame(draw);
+    };
+    draw();
+
+    const canvasStream = canvas.captureStream(30);
+    const compositeVideoTrack = canvasStream.getVideoTracks()[0];
+
+    // Mix the two audio tracks into one via the Web Audio graph.
+    // Both sources feed the same destination node, which exposes a
+    // single mixed track on its .stream.
+    const AudioCtx =
+      window.AudioContext ||
+      (window as unknown as { webkitAudioContext: typeof AudioContext })
+        .webkitAudioContext;
+    const audioCtx = new AudioCtx();
+    const dest = audioCtx.createMediaStreamDestination();
+    const remoteSrc = audioCtx.createMediaStreamSource(
+      new MediaStream([remoteAudio])
+    );
+    const localSrc = audioCtx.createMediaStreamSource(
+      new MediaStream([localAudio])
+    );
+    remoteSrc.connect(dest);
+    localSrc.connect(dest);
+    const mixedAudioTrack = dest.stream.getAudioTracks()[0];
+
+    const stream = new MediaStream([compositeVideoTrack, mixedAudioTrack]);
     chunksRef.current = [];
 
     const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
@@ -164,7 +252,6 @@ export default function StudentPage({
         ? "video/webm"
         : "video/mp4";
 
-    // Set flag BEFORE creating recorder to prevent re-entrancy
     recordingStartedRef.current = true;
     recordingStartMsRef.current = Date.now();
 
@@ -176,7 +263,25 @@ export default function StudentPage({
     };
     recorder.start(1000);
     recorderRef.current = recorder;
-    console.log("[Recording] Started with 3 tracks (remote video+audio, local audio), mimeType:", mimeType);
+
+    recordingCleanupRef.current = () => {
+      stopped = true;
+      if (rafId) cancelAnimationFrame(rafId);
+      try {
+        remoteSrc.disconnect();
+        localSrc.disconnect();
+      } catch {}
+      audioCtx.close().catch(() => {});
+      compositeVideoTrack.stop();
+      mixedAudioTrack.stop();
+      leftVideo.srcObject = null;
+      rightVideo.srcObject = null;
+    };
+
+    console.log(
+      "[Recording] Started composite (2x video + mixed audio), mimeType:",
+      mimeType
+    );
   }, []);
 
   // Attach video tracks when participants update
@@ -339,6 +444,13 @@ export default function StudentPage({
 
     durationRef.current = INTERVIEW_DURATION - elapsed;
 
+    // Tear down the composite pipeline AFTER the recorder has stopped
+    // so the final chunk flushes first.
+    if (recordingCleanupRef.current) {
+      recordingCleanupRef.current();
+      recordingCleanupRef.current = null;
+    }
+
     const callObject = callObjectRef.current;
     if (callObject) {
       await callObject.leave();
@@ -357,6 +469,10 @@ export default function StudentPage({
     if (recorder && recorder.state !== "inactive") {
       recorder.stop();
       recorderRef.current = null;
+    }
+    if (recordingCleanupRef.current) {
+      recordingCleanupRef.current();
+      recordingCleanupRef.current = null;
     }
     chunksRef.current = [];
     recordingBlobRef.current = null;
