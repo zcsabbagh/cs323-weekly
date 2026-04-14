@@ -246,11 +246,17 @@ export default function StudentPage({
     const stream = new MediaStream([compositeVideoTrack, mixedAudioTrack]);
     chunksRef.current = [];
 
-    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
-      ? "video/webm;codecs=vp8,opus"
-      : MediaRecorder.isTypeSupported("video/webm")
-        ? "video/webm"
-        : "video/mp4";
+    // Prefer MP4 — Google Drive's WebM transcoder is unreliable and
+    // often leaves uploads stuck on "still being processed." Chrome 126+
+    // and Safari produce playable fragmented MP4 from MediaRecorder;
+    // Firefox falls back to WebM (and the fix-webm-duration patch).
+    const mimeType = MediaRecorder.isTypeSupported("video/mp4;codecs=avc1,mp4a")
+      ? "video/mp4;codecs=avc1,mp4a"
+      : MediaRecorder.isTypeSupported("video/mp4")
+        ? "video/mp4"
+        : MediaRecorder.isTypeSupported("video/webm;codecs=vp8,opus")
+          ? "video/webm;codecs=vp8,opus"
+          : "video/webm";
 
     recordingStartedRef.current = true;
     recordingStartMsRef.current = Date.now();
