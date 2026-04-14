@@ -29,6 +29,7 @@ export interface Submission {
   score: "pass" | "fail" | "pending";
   duration: string;
   status: "pending" | "processing" | "complete" | "error";
+  driveLink?: string;
   createdAt: string;
 }
 
@@ -86,6 +87,7 @@ interface SubmissionRow {
   score: string;
   duration: string | null;
   status: string;
+  drive_link: string | null;
   created_at: string;
 }
 
@@ -100,6 +102,7 @@ function rowToSubmission(row: SubmissionRow): Submission {
     score: row.score as Submission["score"],
     duration: row.duration || "0:00",
     status: row.status as Submission["status"],
+    driveLink: row.drive_link || undefined,
     createdAt: row.created_at,
   };
 }
@@ -214,8 +217,20 @@ export async function saveSubmission(submission: Submission): Promise<void> {
     score: submission.score,
     duration: submission.duration,
     status: submission.status,
+    drive_link: submission.driveLink || null,
     created_at: submission.createdAt,
   });
+  if (error) throw error;
+}
+
+export async function setSubmissionDriveLink(
+  submissionId: string,
+  driveLink: string
+): Promise<void> {
+  const { error } = await supabase
+    .from("cs323_submissions")
+    .update({ drive_link: driveLink })
+    .eq("id", submissionId);
   if (error) throw error;
 }
 

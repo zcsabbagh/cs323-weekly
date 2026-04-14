@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { uploadToDrive } from "@/lib/google-drive";
-import { getAssignment } from "@/lib/db";
+import { getAssignment, setSubmissionDriveLink } from "@/lib/db";
 import { supabase } from "@/lib/supabase";
 import { Readable } from "stream";
 
@@ -56,6 +56,16 @@ export async function POST(req: NextRequest) {
     });
 
     console.log("[Transfer] Uploaded to Drive:", driveLink);
+
+    // Persist the link on the submission row so it's reloadable by
+    // the student (and visible in the teacher dashboard).
+    if (submissionId && driveLink) {
+      try {
+        await setSubmissionDriveLink(submissionId, driveLink);
+      } catch (err) {
+        console.error("[Transfer] Failed to persist drive_link:", err);
+      }
+    }
 
     // Clean up from Supabase Storage
     await supabase.storage.from("cs323-recordings").remove([storagePath]);
