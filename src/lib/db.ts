@@ -8,6 +8,7 @@ export interface Assignment {
   agentId: string; // "tavus" or legacy agent ID
   personaId?: string; // Tavus persona ID (per-assignment)
   driveFolderId?: string; // Google Drive folder for recordings
+  dueDate?: string; // ISO date (YYYY-MM-DD) — when the assignment is due
   createdAt: string;
 }
 
@@ -43,6 +44,7 @@ interface AssignmentRow {
   agent_id: string | null;
   persona_id: string | null;
   drive_folder_id: string | null;
+  due_date: string | null;
   created_at: string;
 }
 
@@ -55,6 +57,7 @@ function rowToAssignment(row: AssignmentRow): Assignment {
     agentId: row.agent_id || "tavus",
     personaId: row.persona_id || undefined,
     driveFolderId: row.drive_folder_id || undefined,
+    dueDate: row.due_date || undefined,
     createdAt: row.created_at,
   };
 }
@@ -137,6 +140,7 @@ export async function saveAssignment(assignment: Assignment): Promise<void> {
     agent_id: assignment.agentId,
     persona_id: assignment.personaId || null,
     drive_folder_id: assignment.driveFolderId || null,
+    due_date: assignment.dueDate || null,
     created_at: assignment.createdAt,
   });
   if (error) throw error;

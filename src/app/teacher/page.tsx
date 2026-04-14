@@ -29,6 +29,17 @@ import type { Assignment, Student } from "@/lib/db";
 
 const TEACHER_PASSWORD = "ebsy";
 
+// Parse "YYYY-MM-DD" as a local date (not UTC) so it renders on the
+// calendar day the DB literally holds.
+function formatDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export default function TeacherPage() {
   const [authenticated, setAuthenticated] = useState(false);
   const [password, setPassword] = useState("");
@@ -312,6 +323,7 @@ export default function TeacherPage() {
                 <TableHeader>
                   <TableRow className="border-border/30 hover:bg-transparent">
                     <TableHead className="text-[11px] text-muted-foreground font-medium h-9">Title</TableHead>
+                    <TableHead className="text-[11px] text-muted-foreground font-medium h-9">Due</TableHead>
                     <TableHead className="text-[11px] text-muted-foreground font-medium h-9">Created</TableHead>
                     <TableHead className="text-[11px] text-muted-foreground font-medium h-9">Submissions</TableHead>
                     <TableHead className="text-[11px] text-muted-foreground font-medium h-9 w-24"></TableHead>
@@ -328,6 +340,9 @@ export default function TeacherPage() {
                     >
                       <TableCell className="text-sm font-medium py-3">
                         {a.title}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground py-3">
+                        {a.dueDate ? formatDate(a.dueDate) : "—"}
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground py-3">
                         {new Date(a.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}

@@ -19,6 +19,19 @@ const supabaseStorage = createClient(
 
 const INTERVIEW_DURATION = 300; // 5 minutes in seconds
 
+// Parse "YYYY-MM-DD" as a local date (NOT UTC) and format as "Apr 19".
+// Using new Date(str) on a bare date string parses as UTC midnight, which
+// renders as the previous calendar day in western timezones.
+function formatDueDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  const local = new Date(y, m - 1, d);
+  return local.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
 type Step = "loading" | "ready" | "connecting" | "interview" | "done" | "submitted";
 
 function usePermissions() {
@@ -618,9 +631,16 @@ export default function StudentPage({
           {/* Assignment header */}
           {step !== "submitted" && assignment && (
             <div className="space-y-1">
-              <p className="text-xs uppercase tracking-widest text-muted-foreground">
-                CS 323
-              </p>
+              <div className="flex items-baseline justify-between gap-3 flex-wrap">
+                <p className="text-xs uppercase tracking-widest text-muted-foreground">
+                  CS 323
+                </p>
+                {assignment.dueDate && (
+                  <p className="text-xs uppercase tracking-widest text-muted-foreground">
+                    Due {formatDueDate(assignment.dueDate)}
+                  </p>
+                )}
+              </div>
               <h1
                 className="font-display italic text-5xl md:text-6xl leading-[1.1]"
                 style={{ textWrap: "balance" }}

@@ -34,7 +34,7 @@ ${description ? "FOCUS ON THESE TOPICS:\n" + description : ""}`;
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { title, description, context } = body;
+  const { title, description, context, dueDate } = body;
 
   if (!title || !context) {
     return NextResponse.json(
@@ -74,6 +74,7 @@ export async function POST(req: NextRequest) {
     agentId: "tavus",
     personaId,
     driveFolderId,
+    dueDate: dueDate || undefined,
     createdAt: new Date().toISOString(),
   };
 
