@@ -90,6 +90,7 @@ export default function StudentPage({
   const [uploadingRecording, setUploadingRecording] = useState(false);
   const [driveLink, setDriveLink] = useState<string | null>(null);
   const [remoteJoined, setRemoteJoined] = useState(false);
+  const [writtenResponse, setWrittenResponse] = useState("");
 
   // Permissions
   const { mic, cam, requestMic, requestCam } = usePermissions();
@@ -382,7 +383,7 @@ export default function StudentPage({
       const res = await api(`/api/assignments/${assignmentId}/conversation`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ writtenResponse }),
       });
       const { conversationId: cid, conversationUrl, conversationName } = await res.json();
       setConversationId(cid);
@@ -701,6 +702,22 @@ export default function StudentPage({
                   </svg>
                   {cam === "granted" ? "Camera ready" : cam === "denied" ? "Camera blocked" : "Allow camera"}
                 </button>
+              </div>
+
+              {/* Written response */}
+              <div className="space-y-2">
+                <Label className="text-sm">
+                  Your written response{" "}
+                  <span className="text-muted-foreground font-normal">
+                    (optional)
+                  </span>
+                </Label>
+                <textarea
+                  value={writtenResponse}
+                  onChange={(e) => setWrittenResponse(e.target.value)}
+                  placeholder="Paste your written assignment here so the TA can ask about what you actually wrote..."
+                  className="w-full min-h-[140px] max-h-[320px] overflow-y-auto resize-none rounded-xl border border-border/40 bg-muted/20 px-4 py-3 text-base text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-transparent transition-colors"
+                />
               </div>
 
               <Button
