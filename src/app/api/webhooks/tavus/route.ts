@@ -20,9 +20,17 @@ export async function POST(req: NextRequest) {
     if (event_type === "application.transcription_ready") {
       const messages = properties?.transcript ?? [];
 
+      // Tavus uses role="system" for the system prompt (drop it),
+      // role="assistant" OR "replica" for the TA turns, and role="user"
+      // for the student. Previously this handler only recognized
+      // "replica" as interviewer, so "assistant" turns AND the system
+      // prompt both got labeled "Student:" — producing a giant
+      // system-prompt-as-student-message at the top of every transcript.
       const transcript = messages
+        .filter((m) => m.role !== "system")
         .map(({ role, content }) => {
-          const speaker = role === "replica" ? "Interviewer" : "Student";
+          const isInterviewer = role === "assistant" || role === "replica";
+          const speaker = isInterviewer ? "Interviewer" : "Student";
           return `${speaker}: ${content}`;
         })
         .join("\n\n");

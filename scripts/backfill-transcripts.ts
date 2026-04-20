@@ -63,13 +63,28 @@ function formatTranscript(
 
 async function main() {
   const dryRun = process.argv.includes("--dry-run");
-  console.log(`[Backfill] Starting${dryRun ? " (DRY RUN)" : ""}...`);
+  // --repair pulls rows whose stored transcript is malformed (contains the
+  // system prompt leak — e.g. starts with "Student: You interview") and
+  // overwrites them with a clean re-fetch from Tavus.
+  const repair = process.argv.includes("--repair");
+  console.log(
+    `[Backfill] Starting${dryRun ? " (DRY RUN)" : ""}${repair ? " (REPAIR MODE)" : ""}...`
+  );
 
-  // Pull every submission that's never received its transcript.
-  const { data: pending, error } = await supabase
+  let query = supabase
     .from("cs323_submissions")
-    .select("id, sunnet_id, conversation_id, status, created_at")
-    .eq("status", "pending");
+    .select("id, sunnet_id, conversation_id, status, transcript, created_at");
+
+  if (repair) {
+    // Malformed rows start with "Student: You interview" (the system prompt
+    // leak) — these need a clean re-fetch.
+    query = query.like("transcript", "Student: You interview%");
+  } else {
+    // Default mode: only pending rows that haven't received a transcript.
+    query = query.eq("status", "pending");
+  }
+
+  const { data: pending, error } = await query;
 
   if (error) {
     console.error("[Backfill] DB query failed:", error);

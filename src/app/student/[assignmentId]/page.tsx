@@ -87,11 +87,44 @@ export default function StudentPage({
   const [sunnetId, setSunnetId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [submissionId, setSubmissionId] = useState<string | null>(null);
-  const [uploadingRecording, setUploadingRecording] = useState(false);
+  // uploadingRecording removed — upload progress is now shown on the
+  // blocking foreground overlay driven by uploadPhase.
   const [driveLink, setDriveLink] = useState<string | null>(null);
   const [remoteJoined, setRemoteJoined] = useState(false);
   const [writtenResponse, setWrittenResponse] = useState("");
   const [localDownloadName, setLocalDownloadName] = useState<string | null>(null);
+  // Explicit upload phases so the UI can show "please don't close this tab"
+  // accurately, and retry precisely which step failed. The old "background
+  // upload after Submitted" flow silently dropped ~90% of recordings.
+  type UploadPhase =
+    | "idle"
+    | "creating-submission"
+    | "uploading-local"
+    | "transferring-drive"
+    | "success"
+    | "error";
+  const [uploadPhase, setUploadPhase] = useState<UploadPhase>("idle");
+  const [uploadError, setUploadError] = useState<string | null>(null);
+
+  // beforeunload guard: while the upload is actively in-flight, the
+  // browser shows a "Leave site? Changes you made may not be saved"
+  // native prompt if the student tries to close the tab or navigate
+  // away. Browsers ignore the custom message but the prompt itself is
+  // what we need — a pause to re-read the "please don't close this tab"
+  // copy on our own overlay.
+  useEffect(() => {
+    const inFlight =
+      uploadPhase === "creating-submission" ||
+      uploadPhase === "uploading-local" ||
+      uploadPhase === "transferring-drive";
+    if (!inFlight) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [uploadPhase]);
 
   // Permissions
   const { mic, cam, requestMic, requestCam } = usePermissions();
@@ -603,34 +636,56 @@ export default function StudentPage({
     setLocalDownloadName(null);
   }, [timerInterval]);
 
-  const submitInterview = useCallback(async () => {
-    if (!conversationId || !sunnetId.trim()) return;
-    setSubmitting(true);
+  // Foregrounded submit: create submission row → upload blob → transfer to
+  // Drive → ONLY THEN flip to the "submitted" screen. Student sees a
+  // blocking "please don't close this tab" overlay during the slow steps,
+  // and any failure leaves them on a retryable state instead of a false
+  // "Submitted ✓" that would make them close the tab.
+  //
+  // existingSubmissionId lets the Retry button reuse the DB row so we
+  // don't create duplicate submissions on transient upload failures.
+  const submitInterview = useCallback(
+    async (existingSubmissionId?: string) => {
+      if (!conversationId || !sunnetId.trim()) return;
 
-    try {
-      const res = await api(`/api/assignments/${assignmentId}/submissions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sunnetId,
-          roomName: conversationId,
-          conversationId,
-          duration: formatTime(durationRef.current || INTERVIEW_DURATION - elapsed),
-        }),
-      });
-      const data = await res.json();
-      const sid = data.id;
-      setSubmissionId(sid);
-      setSubmitting(false);
-      setStep("submitted");
+      setSubmitting(true);
+      setUploadError(null);
 
-      // Upload recording blob in background — upload to Supabase Storage directly
-      // (bypasses Vercel's 4.5MB body limit), then notify server to transfer to Drive
-      const blob = recordingBlobRef.current;
-      console.log("[Recording] submit: blob =", blob ? `${blob.size} bytes, ${blob.type}` : "null");
-      if (blob && blob.size > 0) {
-        setUploadingRecording(true);
-        try {
+      let sid = existingSubmissionId ?? null;
+
+      try {
+        // 1. Create the DB row first (if we don't already have one)
+        if (!sid) {
+          setUploadPhase("creating-submission");
+          const res = await api(
+            `/api/assignments/${assignmentId}/submissions`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                sunnetId,
+                roomName: conversationId,
+                conversationId,
+                duration: formatTime(
+                  durationRef.current || INTERVIEW_DURATION - elapsed
+                ),
+              }),
+            }
+          );
+          if (!res.ok) throw new Error("submission-create");
+          const data = await res.json();
+          sid = data.id;
+          setSubmissionId(sid);
+        }
+
+        // 2. Upload the blob to Supabase Storage (slow — minutes on bad wifi)
+        const blob = recordingBlobRef.current;
+        console.log(
+          "[Recording] submit: blob =",
+          blob ? `${blob.size} bytes, ${blob.type}` : "null"
+        );
+        if (blob && blob.size > 0) {
+          setUploadPhase("uploading-local");
           const ext = blob.type.includes("mp4") ? "mp4" : "webm";
           const path = `${assignmentId}/${sid}.${ext}`;
           console.log("[Recording] uploading to Supabase Storage:", path);
@@ -643,7 +698,8 @@ export default function StudentPage({
           if (uploadError) throw uploadError;
           console.log("[Recording] Supabase upload complete");
 
-          // Now tell the server to transfer to Google Drive
+          // 3. Server-side transfer to Google Drive
+          setUploadPhase("transferring-drive");
           const transferRes = await api(`/api/recordings/transfer`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -655,22 +711,31 @@ export default function StudentPage({
               mimeType: blob.type,
             }),
           });
-          const transferData = await transferRes.json().catch(() => ({}));
+          if (!transferRes.ok) throw new Error("drive-transfer");
+          const transferData = await transferRes
+            .json()
+            .catch(() => ({} as { driveLink?: string }));
           if (transferData?.driveLink) {
             setDriveLink(transferData.driveLink);
           }
           console.log("[Recording] Transfer complete:", transferData?.driveLink);
-        } catch (err) {
-          console.error("Failed to upload recording:", err);
-        } finally {
-          setUploadingRecording(false);
         }
+
+        // 4. All done — safe to show the success screen now
+        setUploadPhase("success");
+        setSubmitting(false);
+        setStep("submitted");
+      } catch (err) {
+        console.error("[Recording] submit failed:", err);
+        setUploadError(err instanceof Error ? err.message : String(err));
+        setUploadPhase("error");
+        setSubmitting(false);
+        // Note: sid may already be saved — keep submissionId so Retry
+        // reuses the same row.
       }
-    } catch (err) {
-      console.error("Failed to submit:", err);
-      setSubmitting(false);
-    }
-  }, [assignmentId, sunnetId, conversationId, elapsed]);
+    },
+    [assignmentId, sunnetId, conversationId, elapsed]
+  );
 
   if (notFound) {
     return (
@@ -688,8 +753,91 @@ export default function StudentPage({
     );
   }
 
+  // Upload phase copy + visual state, driven by the foregrounded submit
+  // flow in submitInterview(). The overlay renders above everything else
+  // and blocks interaction while the Drive upload is in progress.
+  const uploadOverlay = (() => {
+    if (uploadPhase === "idle" || uploadPhase === "success") return null;
+    const isError = uploadPhase === "error";
+    const phaseCopy: Record<UploadPhase, string> = {
+      idle: "",
+      "creating-submission": "Saving your submission…",
+      "uploading-local": "Uploading your recording — this can take a minute on slow wifi…",
+      "transferring-drive": "Finalizing upload to Google Drive…",
+      success: "Done",
+      error: "Upload failed",
+    };
+    return (
+      <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm flex items-center justify-center px-6">
+        <div className="w-full max-w-md rounded-2xl border border-border/40 bg-card/80 p-8 text-center space-y-5 shadow-2xl">
+          {!isError ? (
+            <>
+              <div className="w-10 h-10 mx-auto border-2 border-muted-foreground/30 border-t-foreground rounded-full animate-spin" />
+              <div className="space-y-2">
+                <p className="text-lg font-medium">{phaseCopy[uploadPhase]}</p>
+                <p className="text-sm text-destructive font-medium">
+                  Please do not close this tab until the Google Drive link appears.
+                </p>
+                {localDownloadName && (
+                  <p className="text-xs text-muted-foreground pt-1">
+                    A local copy was already saved to your Downloads as backup.
+                  </p>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="mx-auto w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center">
+                <svg
+                  className="h-5 w-5 text-destructive"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z" />
+                </svg>
+              </div>
+              <div className="space-y-2">
+                <p className="text-lg font-medium">Upload failed</p>
+                <p className="text-sm text-muted-foreground">
+                  {uploadError || "Something went wrong uploading to Google Drive."}
+                </p>
+                {localDownloadName && (
+                  <p className="text-xs text-muted-foreground">
+                    Don&apos;t worry — a local copy is in your Downloads folder as{" "}
+                    <span className="font-mono">{localDownloadName}</span>.
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-2 pt-1">
+                <Button
+                  variant="outline"
+                  className="flex-1 rounded-xl"
+                  onClick={() => {
+                    setUploadPhase("idle");
+                    setUploadError(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  className="flex-1 rounded-xl"
+                  onClick={() => submitInterview(submissionId ?? undefined)}
+                >
+                  Retry
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  })();
+
   return (
     <div className="min-h-screen flex items-center justify-center px-6 py-12">
+      {uploadOverlay}
       <div className="w-full max-w-5xl">
         <div
           className="rounded-2xl border border-border/40 bg-card/60 backdrop-blur-sm p-8 md:p-10 space-y-8"
@@ -959,7 +1107,7 @@ export default function StudentPage({
                   Re-record
                 </Button>
                 <Button
-                  onClick={submitInterview}
+                  onClick={() => submitInterview()}
                   disabled={!sunnetId.trim() || submitting}
                   className="flex-1 h-14 text-base rounded-xl hover:scale-[1.01] active:scale-[0.96]"
                   style={{
@@ -997,9 +1145,8 @@ export default function StudentPage({
               >
                 Your interview has been recorded and will be processed shortly.
               </p>
-              {uploadingRecording && !driveLink && (
-                <p className="text-sm text-muted-foreground">Uploading recording...</p>
-              )}
+              {/* Upload progress moved to the blocking overlay — by the
+                  time we reach "submitted" the Drive link is ready. */}
               {driveLink && (
                 <div className="pt-3 space-y-1">
                   <p className="text-[10px] text-muted-foreground uppercase tracking-widest">
