@@ -6,11 +6,17 @@ import { createConversation } from "@/lib/tavus";
 const TAVUS_REPLICA_ID = process.env.TAVUS_REPLICA_ID!;
 const TAVUS_PERSONA_ID = process.env.TAVUS_PERSONA_ID!;
 
-const APP_URL =
+// Trim + strip trailing slashes defensively — a stray newline/whitespace in
+// an env var silently produces malformed callback URLs that Tavus can't hit,
+// which leaves every submission stuck at "pending" forever (April 2026 bug).
+const APP_URL = (
   process.env.NEXT_PUBLIC_URL ||
   (process.env.RAILWAY_PUBLIC_DOMAIN
     ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
-    : "http://localhost:3000");
+    : "http://localhost:3000")
+)
+  .trim()
+  .replace(/\/+$/, "");
 
 export async function POST(
   req: NextRequest,
