@@ -2,7 +2,7 @@
 
 import { copyToClipboard } from "@/lib/copy";
 import { api } from "@/lib/api";
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, useRef, use } from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,6 +59,42 @@ export default function AssignmentDetailPage({
       .then((r) => r.json())
       .then(setStudents);
   }, [assignmentId]);
+
+  // Auto-process: any submission that has a transcript but no summary yet
+  // gets silently sent through the analyze endpoint, which writes back a
+  // summary + pass/fail score. Runs whenever the submissions list changes
+  // (initial load, after a webhook flips one to complete, etc). We track
+  // in-flight IDs in a ref so we don't double-fire across re-renders.
+  const autoProcessingRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const needsProcessing = submissions.filter(
+      (s) =>
+        s.transcript?.trim() &&
+        !s.summary?.trim() &&
+        !autoProcessingRef.current.has(s.id)
+    );
+    if (needsProcessing.length === 0) return;
+
+    needsProcessing.forEach((s) => {
+      autoProcessingRef.current.add(s.id);
+      fetch(
+        `/api/assignments/${assignmentId}/submissions/${s.id}/process`,
+        { method: "POST" }
+      )
+        .then((r) => (r.ok ? r.json() : null))
+        .then((updated) => {
+          if (!updated) return;
+          setSubmissions((prev) =>
+            prev.map((row) => (row.id === updated.id ? updated : row))
+          );
+          setSelected((cur) => (cur?.id === updated.id ? updated : cur));
+        })
+        .catch((err) => console.error("[auto-process]", s.id, err))
+        .finally(() => {
+          autoProcessingRef.current.delete(s.id);
+        });
+    });
+  }, [submissions, assignmentId]);
 
   const studentUrl =
     typeof window !== "undefined"
@@ -247,8 +283,11 @@ export default function AssignmentDetailPage({
         {/* ── Side panel ── */}
         {selected && (
           <div className="w-1/2 border-l border-border pl-6">
-            <div className="sticky top-6">
-              <div className="flex items-center justify-between mb-4">
+            {/* Bounded flex column: sticky to the viewport, height = viewport
+                minus the sticky offset + a bit of bottom breathing room. The
+                transcript ScrollArea inside flexes to fill whatever's left. */}
+            <div className="sticky top-6 h-[calc(100vh-3rem)] flex flex-col">
+              <div className="flex items-center justify-between mb-4 shrink-0">
                 <div>
                   <h3 className="text-sm font-medium">
                     {lookupStudent(selected.sunnetId)}
@@ -310,8 +349,8 @@ export default function AssignmentDetailPage({
                 </div>
               </div>
 
-              <div className="space-y-5">
-                <div>
+              <div className="flex flex-col flex-1 min-h-0 gap-5">
+                <div className="shrink-0">
                   <h4 className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-2">
                     Summary
                   </h4>
@@ -320,13 +359,15 @@ export default function AssignmentDetailPage({
                   </div>
                 </div>
 
-                <Separator />
+                <Separator className="shrink-0" />
 
-                <div>
-                  <h4 className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-2">
+                <div className="flex flex-col flex-1 min-h-0">
+                  <h4 className="text-[10px] font-medium text-muted-foreground uppercase tracking-widest mb-2 shrink-0">
                     Transcript
                   </h4>
-                  <ScrollArea className="h-[400px]">
+                  {/* flex-1 + min-h-0 lets the ScrollArea consume all
+                      remaining vertical space inside the bounded panel. */}
+                  <ScrollArea className="flex-1 min-h-0">
                     <div className="space-y-2 pr-4">
                       {selected.transcript ? (
                         selected.transcript.split("\n\n").map((line, i) => {

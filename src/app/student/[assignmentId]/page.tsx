@@ -191,15 +191,27 @@ export default function StudentPage({
       return;
     }
 
-    // Hidden <video> elements drive the canvas draw — detached from the
-    // DOM but muted so they don't produce audio (remoteAudioRef handles
-    // playback; mixing happens separately below).
+    // Hidden <video> elements drive the canvas draw — muted so they don't
+    // produce audio (remoteAudioRef handles playback; mixing happens
+    // separately below).
+    //
+    // CRITICAL: these MUST be attached to the DOM. Several browsers
+    // (Safari, some Chromium paths) don't tick the video decode pipeline
+    // for detached <video> elements — they decode one frame on
+    // loadedmetadata and then freeze. The rAF draw loop still fires,
+    // canvas.captureStream still emits 30fps, but every frame is the
+    // same — producing a "frozen video + working audio" recording.
+    // We position them off-screen so they render invisibly without
+    // affecting layout; display:none would also break the decode path.
     const makeHiddenVideo = (track: MediaStreamTrack) => {
       const el = document.createElement("video");
       el.srcObject = new MediaStream([track]);
       el.muted = true;
       el.playsInline = true;
       el.autoplay = true;
+      el.style.cssText =
+        "position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none;";
+      document.body.appendChild(el);
       el.play().catch(() => {});
       return el;
     };
@@ -312,6 +324,8 @@ export default function StudentPage({
       mixedAudioTrack.stop();
       leftVideo.srcObject = null;
       rightVideo.srcObject = null;
+      leftVideo.remove();
+      rightVideo.remove();
     };
 
     console.log(
