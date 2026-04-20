@@ -91,6 +91,7 @@ export default function StudentPage({
   const [driveLink, setDriveLink] = useState<string | null>(null);
   const [remoteJoined, setRemoteJoined] = useState(false);
   const [writtenResponse, setWrittenResponse] = useState("");
+  const [localDownloadName, setLocalDownloadName] = useState<string | null>(null);
 
   // Permissions
   const { mic, cam, requestMic, requestCam } = usePermissions();
@@ -427,6 +428,29 @@ export default function StudentPage({
     }
   }, [assignmentId, attachTracks, startTimer, timerInterval]);
 
+  // Trigger a browser "Save As" for the recording blob so the student
+  // always has a local copy — defensive backup in case the Supabase/Drive
+  // upload silently fails (wifi drop, tab closed during background upload,
+  // etc). Fires once right after endInterview builds the blob.
+  const downloadRecording = useCallback((blob: Blob, filename: string) => {
+    try {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.style.display = "none";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      // Revoke after the browser has had a moment to initiate the download;
+      // revoking immediately cancels it on some browsers.
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      console.log("[Recording] Triggered download:", filename, blob.size, "bytes");
+    } catch (err) {
+      console.error("[Recording] Download trigger failed:", err);
+    }
+  }, []);
+
   const endInterview = useCallback(async () => {
     if (timerInterval) clearInterval(timerInterval);
 
@@ -479,6 +503,20 @@ export default function StudentPage({
 
     durationRef.current = INTERVIEW_DURATION - elapsed;
 
+    // Trigger local download of the recording as a backup copy.
+    // Filename is timestamped so students can differentiate re-records.
+    const finalBlob = recordingBlobRef.current;
+    if (finalBlob && finalBlob.size > 0) {
+      const ext = finalBlob.type.includes("mp4") ? "mp4" : "webm";
+      const stamp = new Date()
+        .toISOString()
+        .replace(/[:.]/g, "-")
+        .slice(0, 19); // YYYY-MM-DDTHH-MM-SS
+      const filename = `cs323-interview-${stamp}.${ext}`;
+      downloadRecording(finalBlob, filename);
+      setLocalDownloadName(filename);
+    }
+
     // Tear down the composite pipeline AFTER the recorder has stopped
     // so the final chunk flushes first.
     if (recordingCleanupRef.current) {
@@ -494,7 +532,7 @@ export default function StudentPage({
     }
 
     setStep("done");
-  }, [timerInterval, elapsed]);
+  }, [timerInterval, elapsed, downloadRecording]);
 
   const restart = useCallback(async () => {
     if (timerInterval) clearInterval(timerInterval);
@@ -532,6 +570,7 @@ export default function StudentPage({
     setElapsed(0);
     setRemoteJoined(false);
     setDriveLink(null);
+    setLocalDownloadName(null);
   }, [timerInterval]);
 
   const submitInterview = useCallback(async () => {
@@ -824,6 +863,44 @@ export default function StudentPage({
                   Duration: {formatTime(durationRef.current || INTERVIEW_DURATION - elapsed)}
                 </p>
               </div>
+
+              {/* Local backup download hint */}
+              {localDownloadName && (
+                <div className="rounded-xl border border-border/40 bg-muted/20 px-4 py-3 flex items-start gap-3">
+                  <svg
+                    className="w-5 h-5 shrink-0 text-muted-foreground mt-0.5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    strokeWidth={1.5}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3"
+                    />
+                  </svg>
+                  <div className="text-sm leading-relaxed flex-1">
+                    <p className="font-medium">Saved a copy to your Downloads</p>
+                    <p className="text-muted-foreground text-xs mt-0.5">
+                      {localDownloadName} — keep this as a backup in case the
+                      upload fails.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const blob = recordingBlobRef.current;
+                        if (blob && localDownloadName) {
+                          downloadRecording(blob, localDownloadName);
+                        }
+                      }}
+                      className="text-xs text-foreground underline underline-offset-2 mt-1.5 hover:no-underline"
+                    >
+                      Download again
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-2">
                 <Label htmlFor="sunnet" className="text-sm">
