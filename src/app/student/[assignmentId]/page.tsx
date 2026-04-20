@@ -191,32 +191,27 @@ export default function StudentPage({
       return;
     }
 
-    // Hidden <video> elements drive the canvas draw — muted so they don't
-    // produce audio (remoteAudioRef handles playback; mixing happens
-    // separately below).
+    // Reuse the ALREADY-VISIBLE <video> elements as canvas sources instead
+    // of spinning up hidden duplicates. This halves the decode work per
+    // frame — previously we had 4 decode pipelines running (2 visible +
+    // 2 hidden off-screen) which caused noticeable stutter on the local
+    // self-cam since it was also encoding-for-upload to Daily.
     //
-    // CRITICAL: these MUST be attached to the DOM. Several browsers
-    // (Safari, some Chromium paths) don't tick the video decode pipeline
-    // for detached <video> elements — they decode one frame on
-    // loadedmetadata and then freeze. The rAF draw loop still fires,
-    // canvas.captureStream still emits 30fps, but every frame is the
-    // same — producing a "frozen video + working audio" recording.
-    // We position them off-screen so they render invisibly without
-    // affecting layout; display:none would also break the decode path.
-    const makeHiddenVideo = (track: MediaStreamTrack) => {
-      const el = document.createElement("video");
-      el.srcObject = new MediaStream([track]);
-      el.muted = true;
-      el.playsInline = true;
-      el.autoplay = true;
-      el.style.cssText =
-        "position:fixed;left:-9999px;top:0;width:2px;height:2px;opacity:0;pointer-events:none;";
-      document.body.appendChild(el);
-      el.play().catch(() => {});
-      return el;
-    };
-    const leftVideo = makeHiddenVideo(remoteVideo);
-    const rightVideo = makeHiddenVideo(localVideo);
+    // Visible on-screen elements always tick their decode pipeline
+    // (unlike detached elements), so this also avoids the "frozen first
+    // frame" class of bugs that the hidden-element approach was trying
+    // to solve.
+    //
+    // CSS transforms on the visible elements (e.g. the self-cam mirror
+    // via scaleX(-1)) don't leak into drawImage — that paints the raw
+    // decoded frame, which is the natural orientation we want in the
+    // recording.
+    const leftVideo = replicaVideoRef.current;
+    const rightVideo = selfVideoRef.current;
+    if (!leftVideo || !rightVideo) {
+      console.error("[Recording] Visible video refs not attached yet");
+      return;
+    }
 
     // Aspect-preserving "cover" fit — crops to fill the tile without stretching.
     const drawCover = (
@@ -249,7 +244,10 @@ export default function StudentPage({
     };
     draw();
 
-    const canvasStream = canvas.captureStream(30);
+    // 24fps is visually smooth for talking-head video and meaningfully
+    // lighter on CPU than 30fps — helps lower-end student laptops keep
+    // the self-cam stream fluid during recording.
+    const canvasStream = canvas.captureStream(24);
     const compositeVideoTrack = canvasStream.getVideoTracks()[0];
 
     // Mix the two audio tracks into one via the Web Audio graph.
@@ -322,10 +320,8 @@ export default function StudentPage({
       audioCtx.close().catch(() => {});
       compositeVideoTrack.stop();
       mixedAudioTrack.stop();
-      leftVideo.srcObject = null;
-      rightVideo.srcObject = null;
-      leftVideo.remove();
-      rightVideo.remove();
+      // leftVideo + rightVideo are the visible on-screen elements now,
+      // owned by React — don't null their srcObject or remove them.
     };
 
     console.log(
@@ -334,7 +330,23 @@ export default function StudentPage({
     );
   }, []);
 
-  // Attach video tracks when participants update
+  // Attach video/audio tracks when participants update.
+  //
+  // IMPORTANT: only reassign srcObject when the underlying TRACK changes,
+  // not on every event. Daily fires `participant-updated` several times
+  // per second (audio level, mute state, etc.) — a fresh
+  // `new MediaStream([track])` is always a new object so the old
+  // `srcObject !== stream` check was always true, and the <video>
+  // elements were tearing down + rebuilding their decode pipeline on
+  // every Daily event. That produced visible stutter on the self-cam
+  // especially, since it's already doing encode-for-upload work.
+  const hasTrack = (el: HTMLMediaElement | null, track: MediaStreamTrack) => {
+    if (!el || !el.srcObject) return false;
+    const stream = el.srcObject as MediaStream;
+    const tracks = track.kind === "video" ? stream.getVideoTracks() : stream.getAudioTracks();
+    return tracks[0] === track;
+  };
+
   const attachTracks = useCallback(() => {
     const callObject = callObjectRef.current;
     if (!callObject) return;
@@ -343,11 +355,13 @@ export default function StudentPage({
 
     // Local participant video
     const local = participants.local;
-    if (local?.tracks?.video?.persistentTrack && selfVideoRef.current) {
-      const stream = new MediaStream([local.tracks.video.persistentTrack]);
-      if (selfVideoRef.current.srcObject !== stream) {
-        selfVideoRef.current.srcObject = stream;
-      }
+    const localVideoTrack = local?.tracks?.video?.persistentTrack;
+    if (
+      localVideoTrack &&
+      selfVideoRef.current &&
+      !hasTrack(selfVideoRef.current, localVideoTrack)
+    ) {
+      selfVideoRef.current.srcObject = new MediaStream([localVideoTrack]);
     }
 
     // Remote participant video (first non-local)
@@ -355,22 +369,24 @@ export default function StudentPage({
       (p: DailyParticipant) => !p.local
     ) as DailyParticipant | undefined;
 
-    if (remoteParticipant?.tracks?.video?.persistentTrack && replicaVideoRef.current) {
-      const stream = new MediaStream([remoteParticipant.tracks.video.persistentTrack]);
-      if (replicaVideoRef.current.srcObject !== stream) {
-        replicaVideoRef.current.srcObject = stream;
-      }
+    const remoteVideoTrack = remoteParticipant?.tracks?.video?.persistentTrack;
+    if (
+      remoteVideoTrack &&
+      replicaVideoRef.current &&
+      !hasTrack(replicaVideoRef.current, remoteVideoTrack)
+    ) {
+      replicaVideoRef.current.srcObject = new MediaStream([remoteVideoTrack]);
     }
 
     // Attach remote audio for playback
-    if (remoteParticipant?.tracks?.audio?.persistentTrack) {
+    const remoteAudioTrack = remoteParticipant?.tracks?.audio?.persistentTrack;
+    if (remoteAudioTrack) {
       if (!remoteAudioRef.current) {
         remoteAudioRef.current = new Audio();
         remoteAudioRef.current.autoplay = true;
       }
-      const audioStream = new MediaStream([remoteParticipant.tracks.audio.persistentTrack]);
-      if (remoteAudioRef.current.srcObject !== audioStream) {
-        remoteAudioRef.current.srcObject = audioStream;
+      if (!hasTrack(remoteAudioRef.current, remoteAudioTrack)) {
+        remoteAudioRef.current.srcObject = new MediaStream([remoteAudioTrack]);
         remoteAudioRef.current.play().catch(() => {});
       }
     }
