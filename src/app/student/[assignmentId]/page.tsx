@@ -334,7 +334,19 @@ export default function StudentPage({
     recordingStartedRef.current = true;
     recordingStartMsRef.current = Date.now();
 
-    const recorder = new MediaRecorder(stream, { mimeType });
+    // Cap bitrate so blobs fit under the Supabase bucket's 50 MB file-size
+    // limit for a full 5-minute interview. MediaRecorder's default
+    // bitrate (~2.5-5 Mbps on Chrome) produces 60-150 MB blobs for a
+    // 1280×480 composite over 5 min, which Supabase rejects with
+    // "exceeded the maximum allowed size." Talking-head content at
+    // 800 kbps video + 96 kbps audio is visually fine and lands around
+    // 34 MB for a full 5-min interview — comfortably under 50 MB with
+    // room for codec overhead.
+    const recorder = new MediaRecorder(stream, {
+      mimeType,
+      videoBitsPerSecond: 800_000,
+      audioBitsPerSecond: 96_000,
+    });
     recorder.ondataavailable = (e) => {
       if (e.data.size > 0) {
         chunksRef.current.push(e.data);
